@@ -1,0 +1,2940 @@
+# OpenFang model catalog — single source of truth for model metadata and pricing.
+# Generated from crates/openfang-runtime/src/model_catalog.rs builtin_models()
+
+# ══════════════════════════════════════════════════════════════
+# Anthropic (7)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "claude-opus-4-6"
+display_name = "Claude Opus 4.6"
+provider = "anthropic"
+tier = "frontier"
+context_window = 200000
+max_output_tokens = 128000
+input_cost_per_m = 5.0
+output_cost_per_m = 25.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["opus", "claude-opus"]
+
+[[model]]
+id = "claude-sonnet-4-6"
+display_name = "Claude Sonnet 4.6"
+provider = "anthropic"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 64000
+input_cost_per_m = 3.0
+output_cost_per_m = 15.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["sonnet", "claude-sonnet"]
+
+[[model]]
+id = "claude-opus-4-20250514"
+display_name = "Claude Opus 4"
+provider = "anthropic"
+tier = "frontier"
+context_window = 200000
+max_output_tokens = 32000
+input_cost_per_m = 15.0
+output_cost_per_m = 75.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "claude-sonnet-4-20250514"
+display_name = "Claude Sonnet 4"
+provider = "anthropic"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 64000
+input_cost_per_m = 3.0
+output_cost_per_m = 15.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "claude-haiku-4-5-20251001"
+display_name = "Claude Haiku 4.5"
+provider = "anthropic"
+tier = "fast"
+context_window = 200000
+max_output_tokens = 8192
+input_cost_per_m = 0.25
+output_cost_per_m = 1.25
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["haiku", "claude-haiku"]
+
+[[model]]
+id = "claude-sonnet-4-5-20250514"
+display_name = "Claude Sonnet 4.5"
+provider = "anthropic"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 64000
+input_cost_per_m = 3.0
+output_cost_per_m = 15.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "claude-3-5-sonnet-20241022"
+display_name = "Claude 3.5 Sonnet"
+provider = "anthropic"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 8192
+input_cost_per_m = 3.0
+output_cost_per_m = 15.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# OpenAI (16)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "gpt-4o"
+display_name = "GPT-4o"
+provider = "openai"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 16384
+input_cost_per_m = 2.50
+output_cost_per_m = 10.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["gpt4", "gpt4o"]
+
+[[model]]
+id = "gpt-4o-mini"
+display_name = "GPT-4o Mini"
+provider = "openai"
+tier = "fast"
+context_window = 128000
+max_output_tokens = 16384
+input_cost_per_m = 0.15
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["gpt4-mini"]
+
+[[model]]
+id = "gpt-4.1"
+display_name = "GPT-4.1"
+provider = "openai"
+tier = "frontier"
+context_window = 1047576
+max_output_tokens = 32768
+input_cost_per_m = 2.00
+output_cost_per_m = 8.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gpt-4.1-mini"
+display_name = "GPT-4.1 Mini"
+provider = "openai"
+tier = "balanced"
+context_window = 1047576
+max_output_tokens = 32768
+input_cost_per_m = 0.40
+output_cost_per_m = 1.60
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gpt-4.1-nano"
+display_name = "GPT-4.1 Nano"
+provider = "openai"
+tier = "fast"
+context_window = 1047576
+max_output_tokens = 32768
+input_cost_per_m = 0.10
+output_cost_per_m = 0.40
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "o3"
+display_name = "o3"
+provider = "openai"
+tier = "frontier"
+context_window = 200000
+max_output_tokens = 100000
+input_cost_per_m = 2.00
+output_cost_per_m = 8.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "o3-mini"
+display_name = "o3-mini"
+provider = "openai"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 100000
+input_cost_per_m = 1.10
+output_cost_per_m = 4.40
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "o4-mini"
+display_name = "o4-mini"
+provider = "openai"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 100000
+input_cost_per_m = 1.10
+output_cost_per_m = 4.40
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gpt-4-turbo"
+display_name = "GPT-4 Turbo"
+provider = "openai"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 10.00
+output_cost_per_m = 30.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gpt-3.5-turbo"
+display_name = "GPT-3.5 Turbo"
+provider = "openai"
+tier = "fast"
+context_window = 16385
+max_output_tokens = 4096
+input_cost_per_m = 0.50
+output_cost_per_m = 1.50
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gpt-5"
+display_name = "GPT-5"
+provider = "openai"
+tier = "frontier"
+context_window = 400000
+max_output_tokens = 128000
+input_cost_per_m = 1.25
+output_cost_per_m = 10.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gpt-5-mini"
+display_name = "GPT-5 Mini"
+provider = "openai"
+tier = "balanced"
+context_window = 400000
+max_output_tokens = 128000
+input_cost_per_m = 0.25
+output_cost_per_m = 2.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["gpt5-mini"]
+
+[[model]]
+id = "gpt-5-nano"
+display_name = "GPT-5 Nano"
+provider = "openai"
+tier = "fast"
+context_window = 400000
+max_output_tokens = 128000
+input_cost_per_m = 0.05
+output_cost_per_m = 0.40
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gpt-5.1"
+display_name = "GPT-5.1"
+provider = "openai"
+tier = "frontier"
+context_window = 400000
+max_output_tokens = 128000
+input_cost_per_m = 1.25
+output_cost_per_m = 10.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gpt-5.2"
+display_name = "GPT-5.2"
+provider = "openai"
+tier = "frontier"
+context_window = 400000
+max_output_tokens = 128000
+input_cost_per_m = 1.75
+output_cost_per_m = 14.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["gpt5"]
+
+[[model]]
+id = "gpt-5.2-pro"
+display_name = "GPT-5.2 Pro"
+provider = "openai"
+tier = "frontier"
+context_window = 400000
+max_output_tokens = 128000
+input_cost_per_m = 1.75
+output_cost_per_m = 14.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Google Gemini (10)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "gemini-3.1-pro-preview"
+display_name = "Gemini 3.1 Pro Preview"
+provider = "gemini"
+tier = "frontier"
+context_window = 1048576
+max_output_tokens = 65536
+input_cost_per_m = 2.50
+output_cost_per_m = 15.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["gemini-pro"]
+
+[[model]]
+id = "gemini-3-flash-preview"
+display_name = "Gemini 3 Flash Preview"
+provider = "gemini"
+tier = "smart"
+context_window = 1048576
+max_output_tokens = 65536
+input_cost_per_m = 0.15
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["gemini-flash"]
+
+[[model]]
+id = "gemini-3.1-flash-lite-preview"
+display_name = "Gemini 3.1 Flash Lite Preview"
+provider = "gemini"
+tier = "fast"
+context_window = 1048576
+max_output_tokens = 8192
+input_cost_per_m = 0.04
+output_cost_per_m = 0.15
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gemini-2.5-flash-lite"
+display_name = "Gemini 2.5 Flash Lite"
+provider = "gemini"
+tier = "fast"
+context_window = 1048576
+max_output_tokens = 8192
+input_cost_per_m = 0.04
+output_cost_per_m = 0.15
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gemini-2.5-pro"
+display_name = "Gemini 2.5 Pro"
+provider = "gemini"
+tier = "frontier"
+context_window = 1048576
+max_output_tokens = 65536
+input_cost_per_m = 1.25
+output_cost_per_m = 10.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gemini-2.5-flash"
+display_name = "Gemini 2.5 Flash"
+provider = "gemini"
+tier = "smart"
+context_window = 1048576
+max_output_tokens = 65536
+input_cost_per_m = 0.15
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gemini-2.0-flash"
+display_name = "Gemini 2.0 Flash"
+provider = "gemini"
+tier = "fast"
+context_window = 1048576
+max_output_tokens = 8192
+input_cost_per_m = 0.10
+output_cost_per_m = 0.40
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gemini-2.0-flash-lite"
+display_name = "Gemini 2.0 Flash Lite"
+provider = "gemini"
+tier = "fast"
+context_window = 1048576
+max_output_tokens = 8192
+input_cost_per_m = 0.075
+output_cost_per_m = 0.30
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gemini-1.5-pro"
+display_name = "Gemini 1.5 Pro"
+provider = "gemini"
+tier = "smart"
+context_window = 2097152
+max_output_tokens = 8192
+input_cost_per_m = 1.25
+output_cost_per_m = 5.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "gemini-1.5-flash"
+display_name = "Gemini 1.5 Flash"
+provider = "gemini"
+tier = "fast"
+context_window = 1048576
+max_output_tokens = 8192
+input_cost_per_m = 0.075
+output_cost_per_m = 0.30
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# DeepSeek (4)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "deepseek-chat"
+display_name = "DeepSeek V3"
+provider = "deepseek"
+tier = "smart"
+context_window = 64000
+max_output_tokens = 8192
+input_cost_per_m = 0.27
+output_cost_per_m = 1.10
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["deepseek", "deepseek-v3"]
+
+[[model]]
+id = "deepseek-reasoner"
+display_name = "DeepSeek R1"
+provider = "deepseek"
+tier = "frontier"
+context_window = 64000
+max_output_tokens = 8192
+input_cost_per_m = 0.55
+output_cost_per_m = 2.19
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = ["deepseek-r1"]
+
+[[model]]
+id = "deepseek-coder"
+display_name = "DeepSeek Coder V2"
+provider = "deepseek"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.14
+output_cost_per_m = 0.28
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "deepseek-chat-v3-0324"
+display_name = "DeepSeek V3 0324"
+provider = "deepseek"
+tier = "smart"
+context_window = 64000
+max_output_tokens = 8192
+input_cost_per_m = 0.27
+output_cost_per_m = 1.10
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Azure OpenAI (4)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "azure/gpt-4o"
+display_name = "GPT-4o (Azure)"
+provider = "azure"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 16384
+input_cost_per_m = 2.50
+output_cost_per_m = 10.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "azure/gpt-4o-mini"
+display_name = "GPT-4o Mini (Azure)"
+provider = "azure"
+tier = "fast"
+context_window = 128000
+max_output_tokens = 16384
+input_cost_per_m = 0.15
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "azure/gpt-4.1"
+display_name = "GPT-4.1 (Azure)"
+provider = "azure"
+tier = "frontier"
+context_window = 1047576
+max_output_tokens = 32768
+input_cost_per_m = 2.00
+output_cost_per_m = 8.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "azure/gpt-4.1-mini"
+display_name = "GPT-4.1 Mini (Azure)"
+provider = "azure"
+tier = "fast"
+context_window = 1047576
+max_output_tokens = 32768
+input_cost_per_m = 0.40
+output_cost_per_m = 1.60
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Groq (10)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "llama-3.3-70b-versatile"
+display_name = "Llama 3.3 70B"
+provider = "groq"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 32768
+input_cost_per_m = 0.059
+output_cost_per_m = 0.079
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["llama", "llama-70b"]
+
+[[model]]
+id = "llama-3.1-8b-instant"
+display_name = "Llama 3.1 8B"
+provider = "groq"
+tier = "fast"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.05
+output_cost_per_m = 0.08
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "llama-3.2-90b-vision-preview"
+display_name = "Llama 3.2 90B Vision"
+provider = "groq"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.90
+output_cost_per_m = 0.90
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "llama-3.2-11b-vision-preview"
+display_name = "Llama 3.2 11B Vision"
+provider = "groq"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.18
+output_cost_per_m = 0.18
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "llama-3.2-3b-preview"
+display_name = "Llama 3.2 3B"
+provider = "groq"
+tier = "fast"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.06
+output_cost_per_m = 0.06
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "llama-3.2-1b-preview"
+display_name = "Llama 3.2 1B"
+provider = "groq"
+tier = "fast"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.04
+output_cost_per_m = 0.04
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "mixtral-8x7b-32768"
+display_name = "Mixtral 8x7B"
+provider = "groq"
+tier = "balanced"
+context_window = 32768
+max_output_tokens = 4096
+input_cost_per_m = 0.024
+output_cost_per_m = 0.024
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["mixtral"]
+
+[[model]]
+id = "gemma2-9b-it"
+display_name = "Gemma 2 9B"
+provider = "groq"
+tier = "fast"
+context_window = 8192
+max_output_tokens = 4096
+input_cost_per_m = 0.02
+output_cost_per_m = 0.02
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "qwen-qwq-32b"
+display_name = "Qwen QWQ 32B"
+provider = "groq"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 16384
+input_cost_per_m = 0.20
+output_cost_per_m = 0.20
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "meta-llama/llama-4-scout-17b-16e-instruct"
+display_name = "Llama 4 Scout 17B"
+provider = "groq"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.11
+output_cost_per_m = 0.34
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# OpenRouter (17)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "openrouter/google/gemini-2.5-flash"
+display_name = "Gemini 2.5 Flash (OpenRouter)"
+provider = "openrouter"
+tier = "smart"
+context_window = 1048576
+max_output_tokens = 65536
+input_cost_per_m = 0.15
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/anthropic/claude-sonnet-4"
+display_name = "Claude Sonnet 4 (OpenRouter)"
+provider = "openrouter"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 64000
+input_cost_per_m = 3.0
+output_cost_per_m = 15.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/openai/gpt-4o"
+display_name = "GPT-4o (OpenRouter)"
+provider = "openrouter"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 16384
+input_cost_per_m = 2.5
+output_cost_per_m = 10.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/deepseek/deepseek-chat"
+display_name = "DeepSeek V3 (OpenRouter)"
+provider = "openrouter"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 32768
+input_cost_per_m = 0.14
+output_cost_per_m = 0.28
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/meta-llama/llama-3.3-70b-instruct"
+display_name = "Llama 3.3 70B (OpenRouter)"
+provider = "openrouter"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 32768
+input_cost_per_m = 0.39
+output_cost_per_m = 0.39
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/qwen/qwen-2.5-72b-instruct"
+display_name = "Qwen 2.5 72B (OpenRouter)"
+provider = "openrouter"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 32768
+input_cost_per_m = 0.36
+output_cost_per_m = 0.36
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/google/gemini-2.5-pro"
+display_name = "Gemini 2.5 Pro (OpenRouter)"
+provider = "openrouter"
+tier = "frontier"
+context_window = 1048576
+max_output_tokens = 65536
+input_cost_per_m = 1.25
+output_cost_per_m = 10.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/mistralai/mistral-large-latest"
+display_name = "Mistral Large (OpenRouter)"
+provider = "openrouter"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 2.0
+output_cost_per_m = 6.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/google/gemma-2-9b-it"
+display_name = "Gemma 2 9B (OpenRouter)"
+provider = "openrouter"
+tier = "fast"
+context_window = 8192
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/deepseek/deepseek-r1"
+display_name = "DeepSeek R1 (OpenRouter)"
+provider = "openrouter"
+tier = "frontier"
+context_window = 128000
+max_output_tokens = 32768
+input_cost_per_m = 0.55
+output_cost_per_m = 2.19
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/google/gemma-2-9b-it:free"
+display_name = "Gemma 2 9B Free (OpenRouter)"
+provider = "openrouter"
+tier = "fast"
+context_window = 8192
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/meta-llama/llama-3.1-8b-instruct:free"
+display_name = "Llama 3.1 8B Free (OpenRouter)"
+provider = "openrouter"
+tier = "fast"
+context_window = 131072
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/qwen/qwen-2.5-7b-instruct:free"
+display_name = "Qwen 2.5 7B Free (OpenRouter)"
+provider = "openrouter"
+tier = "fast"
+context_window = 32768
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/mistralai/mistral-7b-instruct:free"
+display_name = "Mistral 7B Free (OpenRouter)"
+provider = "openrouter"
+tier = "fast"
+context_window = 32768
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/huggingfaceh4/zephyr-7b-beta:free"
+display_name = "Zephyr 7B Free (OpenRouter)"
+provider = "openrouter"
+tier = "fast"
+context_window = 4096
+max_output_tokens = 2048
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/deepseek/deepseek-r1:free"
+display_name = "DeepSeek R1 Free (OpenRouter)"
+provider = "openrouter"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 32768
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "openrouter/hunter-alpha"
+display_name = "Hunter Alpha (OpenRouter)"
+provider = "openrouter"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["hunter-alpha"]
+
+# ══════════════════════════════════════════════════════════════
+# Mistral (6)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "mistral-large-latest"
+display_name = "Mistral Large"
+provider = "mistral"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 2.00
+output_cost_per_m = 6.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["mistral"]
+
+[[model]]
+id = "mistral-medium-latest"
+display_name = "Mistral Medium"
+provider = "mistral"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 2.70
+output_cost_per_m = 8.10
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "mistral-small-latest"
+display_name = "Mistral Small"
+provider = "mistral"
+tier = "fast"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.10
+output_cost_per_m = 0.30
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "codestral-latest"
+display_name = "Codestral"
+provider = "mistral"
+tier = "smart"
+context_window = 32000
+max_output_tokens = 8192
+input_cost_per_m = 0.30
+output_cost_per_m = 0.90
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["codestral"]
+
+[[model]]
+id = "open-mistral-nemo"
+display_name = "Mistral Nemo"
+provider = "mistral"
+tier = "fast"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.15
+output_cost_per_m = 0.15
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["mistral-nemo"]
+
+[[model]]
+id = "pixtral-large-latest"
+display_name = "Pixtral Large"
+provider = "mistral"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 2.00
+output_cost_per_m = 6.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["pixtral"]
+
+# ══════════════════════════════════════════════════════════════
+# Together (8)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"
+display_name = "Llama 3.1 405B (Together)"
+provider = "together"
+tier = "frontier"
+context_window = 130000
+max_output_tokens = 4096
+input_cost_per_m = 3.50
+output_cost_per_m = 3.50
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+display_name = "Llama 3.3 70B (Together)"
+provider = "together"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.88
+output_cost_per_m = 0.88
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"
+display_name = "Llama 4 Maverick (Together)"
+provider = "together"
+tier = "smart"
+context_window = 1048576
+max_output_tokens = 8192
+input_cost_per_m = 0.27
+output_cost_per_m = 0.35
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "meta-llama/Llama-4-Scout-17B-16E-Instruct"
+display_name = "Llama 4 Scout (Together)"
+provider = "together"
+tier = "balanced"
+context_window = 512000
+max_output_tokens = 8192
+input_cost_per_m = 0.18
+output_cost_per_m = 0.30
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "deepseek-ai/DeepSeek-R1"
+display_name = "DeepSeek R1 (Together)"
+provider = "together"
+tier = "frontier"
+context_window = 64000
+max_output_tokens = 8192
+input_cost_per_m = 3.00
+output_cost_per_m = 7.00
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "deepseek-ai/DeepSeek-V3"
+display_name = "DeepSeek V3 (Together)"
+provider = "together"
+tier = "smart"
+context_window = 64000
+max_output_tokens = 8192
+input_cost_per_m = 0.90
+output_cost_per_m = 0.90
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "Qwen/Qwen2.5-72B-Instruct-Turbo"
+display_name = "Qwen 2.5 72B (Together)"
+provider = "together"
+tier = "smart"
+context_window = 32768
+max_output_tokens = 4096
+input_cost_per_m = 0.20
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "mistralai/Mixtral-8x22B-Instruct-v0.1"
+display_name = "Mixtral 8x22B (Together)"
+provider = "together"
+tier = "balanced"
+context_window = 65536
+max_output_tokens = 4096
+input_cost_per_m = 0.60
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Fireworks (5)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "accounts/fireworks/models/llama-v3p1-405b-instruct"
+display_name = "Llama 3.1 405B (Fireworks)"
+provider = "fireworks"
+tier = "frontier"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 3.00
+output_cost_per_m = 3.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "accounts/fireworks/models/llama-v3p3-70b-instruct"
+display_name = "Llama 3.3 70B (Fireworks)"
+provider = "fireworks"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 0.90
+output_cost_per_m = 0.90
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "accounts/fireworks/models/deepseek-r1"
+display_name = "DeepSeek R1 (Fireworks)"
+provider = "fireworks"
+tier = "frontier"
+context_window = 64000
+max_output_tokens = 8192
+input_cost_per_m = 3.00
+output_cost_per_m = 8.00
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "accounts/fireworks/models/deepseek-v3"
+display_name = "DeepSeek V3 (Fireworks)"
+provider = "fireworks"
+tier = "smart"
+context_window = 64000
+max_output_tokens = 8192
+input_cost_per_m = 0.90
+output_cost_per_m = 0.90
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "accounts/fireworks/models/mixtral-8x22b-instruct"
+display_name = "Mixtral 8x22B (Fireworks)"
+provider = "fireworks"
+tier = "balanced"
+context_window = 65536
+max_output_tokens = 4096
+input_cost_per_m = 0.90
+output_cost_per_m = 0.90
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# NVIDIA NIM (5)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "nvidia/llama-3.1-nemotron-70b-instruct"
+display_name = "Nemotron 70B Instruct (NVIDIA NIM)"
+provider = "nvidia"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.88
+output_cost_per_m = 0.88
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["nemotron-70b"]
+
+[[model]]
+id = "meta/llama-3.1-405b-instruct"
+display_name = "Llama 3.1 405B Instruct (NVIDIA NIM)"
+provider = "nvidia"
+tier = "frontier"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 5.00
+output_cost_per_m = 16.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "meta/llama-3.1-70b-instruct"
+display_name = "Llama 3.1 70B Instruct (NVIDIA NIM)"
+provider = "nvidia"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.88
+output_cost_per_m = 0.88
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "mistralai/mistral-large-latest"
+display_name = "Mistral Large (NVIDIA NIM)"
+provider = "nvidia"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 2.00
+output_cost_per_m = 6.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "nvidia/nemotron-4-340b-instruct"
+display_name = "Nemotron 4 340B Instruct (NVIDIA NIM)"
+provider = "nvidia"
+tier = "frontier"
+context_window = 4096
+max_output_tokens = 4096
+input_cost_per_m = 4.20
+output_cost_per_m = 4.20
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["nemotron-340b"]
+
+# ══════════════════════════════════════════════════════════════
+# Ollama (6)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "llama3.2"
+display_name = "Llama 3.2 (Ollama)"
+provider = "ollama"
+tier = "local"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "llama3.1"
+display_name = "Llama 3.1 (Ollama)"
+provider = "ollama"
+tier = "local"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "mistral:latest"
+display_name = "Mistral (Ollama)"
+provider = "ollama"
+tier = "local"
+context_window = 32768
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "qwen2.5"
+display_name = "Qwen 2.5 (Ollama)"
+provider = "ollama"
+tier = "local"
+context_window = 32768
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "phi3"
+display_name = "Phi-3 (Ollama)"
+provider = "ollama"
+tier = "local"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "deepseek-r1:latest"
+display_name = "DeepSeek R1 (Ollama)"
+provider = "ollama"
+tier = "local"
+context_window = 64000
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# vLLM (1)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "vllm-local"
+display_name = "vLLM Local Model"
+provider = "vllm"
+tier = "local"
+context_window = 32768
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# LM Studio (1)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "lmstudio-local"
+display_name = "LM Studio Local Model"
+provider = "lmstudio"
+tier = "local"
+context_window = 32768
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Perplexity (4)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "sonar-pro"
+display_name = "Sonar Pro"
+provider = "perplexity"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 8192
+input_cost_per_m = 3.0
+output_cost_per_m = 15.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = ["sonar"]
+
+[[model]]
+id = "sonar-reasoning-pro"
+display_name = "Sonar Reasoning Pro"
+provider = "perplexity"
+tier = "frontier"
+context_window = 200000
+max_output_tokens = 8192
+input_cost_per_m = 2.0
+output_cost_per_m = 8.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "sonar-reasoning"
+display_name = "Sonar Reasoning"
+provider = "perplexity"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 1.0
+output_cost_per_m = 5.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "sonar-basic"
+display_name = "Sonar"
+provider = "perplexity"
+tier = "fast"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 1.0
+output_cost_per_m = 5.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Cohere (4)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "command-r-plus"
+display_name = "Command R+"
+provider = "cohere"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 2.50
+output_cost_per_m = 10.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["command-r"]
+
+[[model]]
+id = "command-r-08-2024"
+display_name = "Command R (Aug 2024)"
+provider = "cohere"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.15
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "command-a"
+display_name = "Command A"
+provider = "cohere"
+tier = "smart"
+context_window = 256000
+max_output_tokens = 8192
+input_cost_per_m = 2.50
+output_cost_per_m = 10.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "command-light"
+display_name = "Command Light"
+provider = "cohere"
+tier = "fast"
+context_window = 4096
+max_output_tokens = 4096
+input_cost_per_m = 0.30
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# AI21 (3)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "jamba-1.5-large"
+display_name = "Jamba 1.5 Large"
+provider = "ai21"
+tier = "smart"
+context_window = 256000
+max_output_tokens = 4096
+input_cost_per_m = 2.0
+output_cost_per_m = 8.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["jamba"]
+
+[[model]]
+id = "jamba-1.5-mini"
+display_name = "Jamba 1.5 Mini"
+provider = "ai21"
+tier = "fast"
+context_window = 256000
+max_output_tokens = 4096
+input_cost_per_m = 0.20
+output_cost_per_m = 0.40
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "jamba-instruct"
+display_name = "Jamba Instruct"
+provider = "ai21"
+tier = "balanced"
+context_window = 256000
+max_output_tokens = 4096
+input_cost_per_m = 0.50
+output_cost_per_m = 0.70
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Cerebras (4)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "cerebras/llama3.3-70b"
+display_name = "Llama 3.3 70B (Cerebras)"
+provider = "cerebras"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.06
+output_cost_per_m = 0.06
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "cerebras/llama3.1-8b"
+display_name = "Llama 3.1 8B (Cerebras)"
+provider = "cerebras"
+tier = "fast"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.01
+output_cost_per_m = 0.01
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "cerebras/llama-4-scout-17b"
+display_name = "Llama 4 Scout (Cerebras)"
+provider = "cerebras"
+tier = "smart"
+context_window = 512000
+max_output_tokens = 8192
+input_cost_per_m = 0.10
+output_cost_per_m = 0.10
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "cerebras/qwen-2.5-32b"
+display_name = "Qwen 2.5 32B (Cerebras)"
+provider = "cerebras"
+tier = "balanced"
+context_window = 32768
+max_output_tokens = 8192
+input_cost_per_m = 0.06
+output_cost_per_m = 0.06
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# SambaNova (3)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "sambanova/llama-3.3-70b"
+display_name = "Llama 3.3 70B (SambaNova)"
+provider = "sambanova"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.06
+output_cost_per_m = 0.06
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "sambanova/deepseek-r1"
+display_name = "DeepSeek R1 (SambaNova)"
+provider = "sambanova"
+tier = "smart"
+context_window = 64000
+max_output_tokens = 8192
+input_cost_per_m = 0.06
+output_cost_per_m = 0.06
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "sambanova/qwen-2.5-72b"
+display_name = "Qwen 2.5 72B (SambaNova)"
+provider = "sambanova"
+tier = "smart"
+context_window = 32768
+max_output_tokens = 8192
+input_cost_per_m = 0.06
+output_cost_per_m = 0.06
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# xAI (9)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "grok-4-0709"
+display_name = "Grok 4"
+provider = "xai"
+tier = "frontier"
+context_window = 256000
+max_output_tokens = 32768
+input_cost_per_m = 3.0
+output_cost_per_m = 15.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["grok", "grok-4"]
+
+[[model]]
+id = "grok-4-fast-reasoning"
+display_name = "Grok 4 Fast Reasoning"
+provider = "xai"
+tier = "smart"
+context_window = 256000
+max_output_tokens = 32768
+input_cost_per_m = 1.0
+output_cost_per_m = 5.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "grok-4-fast-non-reasoning"
+display_name = "Grok 4 Fast Non-Reasoning"
+provider = "xai"
+tier = "smart"
+context_window = 256000
+max_output_tokens = 32768
+input_cost_per_m = 1.0
+output_cost_per_m = 5.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "grok-4-1-fast-reasoning"
+display_name = "Grok 4.1 Fast Reasoning"
+provider = "xai"
+tier = "fast"
+context_window = 2000000
+max_output_tokens = 32768
+input_cost_per_m = 0.20
+output_cost_per_m = 0.50
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["grok-fast"]
+
+[[model]]
+id = "grok-4-1-fast-non-reasoning"
+display_name = "Grok 4.1 Fast Non-Reasoning"
+provider = "xai"
+tier = "fast"
+context_window = 2000000
+max_output_tokens = 32768
+input_cost_per_m = 0.20
+output_cost_per_m = 0.50
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "grok-3"
+display_name = "Grok 3"
+provider = "xai"
+tier = "frontier"
+context_window = 131072
+max_output_tokens = 32768
+input_cost_per_m = 3.0
+output_cost_per_m = 15.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["grok3"]
+
+[[model]]
+id = "grok-3-mini"
+display_name = "Grok 3 Mini"
+provider = "xai"
+tier = "balanced"
+context_window = 131072
+max_output_tokens = 32768
+input_cost_per_m = 0.30
+output_cost_per_m = 0.50
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "grok-2"
+display_name = "Grok 2"
+provider = "xai"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 32768
+input_cost_per_m = 2.0
+output_cost_per_m = 10.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "grok-2-mini"
+display_name = "Grok 2 Mini"
+provider = "xai"
+tier = "fast"
+context_window = 131072
+max_output_tokens = 32768
+input_cost_per_m = 0.30
+output_cost_per_m = 0.50
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["grok-mini"]
+
+# ══════════════════════════════════════════════════════════════
+# Hugging Face (3)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "hf/meta-llama/Llama-3.3-70B-Instruct"
+display_name = "Llama 3.3 70B (HF)"
+provider = "huggingface"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.30
+output_cost_per_m = 0.30
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "hf/deepseek-ai/DeepSeek-R1"
+display_name = "DeepSeek R1 (HF)"
+provider = "huggingface"
+tier = "smart"
+context_window = 64000
+max_output_tokens = 4096
+input_cost_per_m = 0.30
+output_cost_per_m = 0.30
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "hf/Qwen/Qwen2.5-72B-Instruct"
+display_name = "Qwen 2.5 72B (HF)"
+provider = "huggingface"
+tier = "balanced"
+context_window = 32768
+max_output_tokens = 4096
+input_cost_per_m = 0.30
+output_cost_per_m = 0.30
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Replicate (3)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "replicate/meta-llama-3.3-70b-instruct"
+display_name = "Llama 3.3 70B (Replicate)"
+provider = "replicate"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.40
+output_cost_per_m = 0.40
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "replicate/deepseek-r1"
+display_name = "DeepSeek R1 (Replicate)"
+provider = "replicate"
+tier = "smart"
+context_window = 64000
+max_output_tokens = 4096
+input_cost_per_m = 0.40
+output_cost_per_m = 0.40
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "replicate/mistral-7b-instruct"
+display_name = "Mistral 7B (Replicate)"
+provider = "replicate"
+tier = "fast"
+context_window = 32768
+max_output_tokens = 4096
+input_cost_per_m = 0.05
+output_cost_per_m = 0.25
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# GitHub Copilot (2)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "copilot/gpt-4o"
+display_name = "GPT-4o (Copilot)"
+provider = "github-copilot"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["copilot-gpt4o"]
+
+[[model]]
+id = "copilot/gpt-4"
+display_name = "GPT-4 (Copilot)"
+provider = "github-copilot"
+tier = "frontier"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["copilot-gpt4"]
+
+# ══════════════════════════════════════════════════════════════
+# Qwen / Alibaba (11)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "qwen-max"
+display_name = "Qwen Max"
+provider = "qwen"
+tier = "frontier"
+context_window = 32768
+max_output_tokens = 8192
+input_cost_per_m = 4.00
+output_cost_per_m = 12.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "qwen-plus"
+display_name = "Qwen Plus"
+provider = "qwen"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.80
+output_cost_per_m = 2.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["qwen"]
+
+[[model]]
+id = "qwen-turbo"
+display_name = "Qwen Turbo"
+provider = "qwen"
+tier = "fast"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.30
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "qwen-vl-plus"
+display_name = "Qwen VL Plus"
+provider = "qwen"
+tier = "smart"
+context_window = 32768
+max_output_tokens = 8192
+input_cost_per_m = 1.50
+output_cost_per_m = 4.50
+supports_tools = false
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "qwen-coder-plus"
+display_name = "Qwen Coder Plus"
+provider = "qwen"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.80
+output_cost_per_m = 2.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "qwen-long"
+display_name = "Qwen Long"
+provider = "qwen"
+tier = "balanced"
+context_window = 1000000
+max_output_tokens = 8192
+input_cost_per_m = 0.50
+output_cost_per_m = 2.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "qwen3-235b-a22b"
+display_name = "Qwen3 235B"
+provider = "qwen"
+tier = "frontier"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 4.00
+output_cost_per_m = 12.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["qwen3"]
+
+[[model]]
+id = "qwen3-30b-a3b"
+display_name = "Qwen3 30B"
+provider = "qwen"
+tier = "fast"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.30
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "qwen-coder-plus-latest"
+display_name = "Qwen Coder Plus (Latest)"
+provider = "qwen"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.80
+output_cost_per_m = 2.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["qwen-coder"]
+
+[[model]]
+id = "qwen2.5-coder-32b-instruct"
+display_name = "Qwen 2.5 Coder 32B"
+provider = "qwen"
+tier = "balanced"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.80
+output_cost_per_m = 2.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "qwen-vl-max"
+display_name = "Qwen VL Max"
+provider = "qwen"
+tier = "frontier"
+context_window = 32768
+max_output_tokens = 8192
+input_cost_per_m = 3.00
+output_cost_per_m = 9.00
+supports_tools = false
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# MiniMax (6)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "minimax-text-01"
+display_name = "MiniMax Text 01"
+provider = "minimax"
+tier = "smart"
+context_window = 1048576
+max_output_tokens = 16384
+input_cost_per_m = 1.00
+output_cost_per_m = 3.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["minimax"]
+
+[[model]]
+id = "MiniMax-M2.5"
+display_name = "MiniMax M2.5"
+provider = "minimax"
+tier = "frontier"
+context_window = 1048576
+max_output_tokens = 16384
+input_cost_per_m = 1.10
+output_cost_per_m = 4.40
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["minimax-m2.5"]
+
+[[model]]
+id = "MiniMax-M2.5-highspeed"
+display_name = "MiniMax M2.5 Highspeed"
+provider = "minimax"
+tier = "smart"
+context_window = 1048576
+max_output_tokens = 16384
+input_cost_per_m = 0.80
+output_cost_per_m = 3.20
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["minimax-m2.5-highspeed", "m2.5-highspeed"]
+
+[[model]]
+id = "MiniMax-M2.1"
+display_name = "MiniMax M2.1"
+provider = "minimax"
+tier = "smart"
+context_window = 1048576
+max_output_tokens = 16384
+input_cost_per_m = 1.00
+output_cost_per_m = 3.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["minimax-m2.1"]
+
+[[model]]
+id = "abab6.5-chat"
+display_name = "ABAB 6.5 Chat"
+provider = "minimax"
+tier = "balanced"
+context_window = 245760
+max_output_tokens = 8192
+input_cost_per_m = 0.50
+output_cost_per_m = 1.50
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "abab7-chat"
+display_name = "ABAB 7 Chat"
+provider = "minimax"
+tier = "smart"
+context_window = 524288
+max_output_tokens = 16384
+input_cost_per_m = 0.80
+output_cost_per_m = 2.40
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["abab7"]
+
+# ══════════════════════════════════════════════════════════════
+# Zhipu AI / GLM (6)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "glm-4-plus"
+display_name = "GLM-4 Plus"
+provider = "zhipu"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.60
+output_cost_per_m = 2.20
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["glm"]
+
+[[model]]
+id = "glm-4-flash"
+display_name = "GLM-4 Flash"
+provider = "zhipu"
+tier = "fast"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "glm-4v-plus"
+display_name = "GLM-4V Plus"
+provider = "zhipu"
+tier = "smart"
+context_window = 8192
+max_output_tokens = 4096
+input_cost_per_m = 0.60
+output_cost_per_m = 2.20
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "glm-4-long"
+display_name = "GLM-4 Long"
+provider = "zhipu"
+tier = "balanced"
+context_window = 1000000
+max_output_tokens = 8192
+input_cost_per_m = 0.10
+output_cost_per_m = 0.10
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "glm-5-20250605"
+display_name = "GLM-5"
+provider = "zhipu"
+tier = "frontier"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 1.00
+output_cost_per_m = 3.20
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["glm-5"]
+
+[[model]]
+id = "glm-4.7"
+display_name = "GLM-4.7"
+provider = "zhipu"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 0.60
+output_cost_per_m = 2.20
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Zhipu Coding / CodeGeeX (1)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "codegeex-4"
+display_name = "CodeGeeX 4"
+provider = "zhipu_coding"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.10
+output_cost_per_m = 0.10
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["codegeex"]
+
+# ══════════════════════════════════════════════════════════════
+# Z.AI Coding / GLM Coding Models (2)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "glm-5-coding"
+display_name = "GLM-5 Coding"
+provider = "zai_coding"
+tier = "frontier"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 2.00
+output_cost_per_m = 8.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["glm-5-code", "glm-coding"]
+
+[[model]]
+id = "glm-4.7-coding"
+display_name = "GLM-4.7 Coding"
+provider = "zai_coding"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 1.50
+output_cost_per_m = 5.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["glm-4.7-code"]
+
+# ══════════════════════════════════════════════════════════════
+# Moonshot / Kimi (5)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "moonshot-v1-128k"
+display_name = "Moonshot V1 128K"
+provider = "moonshot"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 8192
+input_cost_per_m = 0.80
+output_cost_per_m = 0.80
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "moonshot-v1-32k"
+display_name = "Moonshot V1 32K"
+provider = "moonshot"
+tier = "balanced"
+context_window = 32768
+max_output_tokens = 8192
+input_cost_per_m = 0.30
+output_cost_per_m = 0.30
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "moonshot-v1-8k"
+display_name = "Moonshot V1 8K"
+provider = "moonshot"
+tier = "fast"
+context_window = 8192
+max_output_tokens = 4096
+input_cost_per_m = 0.10
+output_cost_per_m = 0.10
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "kimi-k2"
+display_name = "Kimi K2"
+provider = "moonshot"
+tier = "frontier"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 2.00
+output_cost_per_m = 8.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "kimi-k2.5"
+display_name = "Kimi K2.5"
+provider = "moonshot"
+tier = "frontier"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 2.00
+output_cost_per_m = 8.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["kimi-k2.5-0711"]
+
+# ══════════════════════════════════════════════════════════════
+# Kimi for Code (1)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "kimi-for-coding"
+display_name = "Kimi For Coding"
+provider = "kimi_coding"
+tier = "frontier"
+context_window = 262144
+max_output_tokens = 32768
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Baidu Qianfan / ERNIE (3)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "ernie-4.5-8k"
+display_name = "ERNIE 4.5 8K"
+provider = "qianfan"
+tier = "smart"
+context_window = 8192
+max_output_tokens = 4096
+input_cost_per_m = 2.00
+output_cost_per_m = 6.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["ernie"]
+
+[[model]]
+id = "ernie-4.0-turbo-8k"
+display_name = "ERNIE 4.0 Turbo 8K"
+provider = "qianfan"
+tier = "balanced"
+context_window = 8192
+max_output_tokens = 4096
+input_cost_per_m = 1.00
+output_cost_per_m = 3.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "ernie-speed-128k"
+display_name = "ERNIE Speed 128K"
+provider = "qianfan"
+tier = "fast"
+context_window = 131072
+max_output_tokens = 4096
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# Volcano Engine / Doubao (4)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "doubao-seed-1-6-251015"
+display_name = "Doubao Seed 1.6 Pro"
+provider = "volcengine"
+tier = "smart"
+context_window = 262144
+max_output_tokens = 16384
+input_cost_per_m = 0.80
+output_cost_per_m = 2.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["doubao", "doubao-pro"]
+
+[[model]]
+id = "doubao-seed-2-0-lite"
+display_name = "Doubao Seed 2.0 Lite"
+provider = "volcengine"
+tier = "balanced"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 0.30
+output_cost_per_m = 0.60
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["doubao-lite"]
+
+[[model]]
+id = "doubao-seed-2-0-mini"
+display_name = "Doubao Seed 2.0 Mini"
+provider = "volcengine"
+tier = "fast"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 0.10
+output_cost_per_m = 0.10
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["doubao-mini"]
+
+[[model]]
+id = "doubao-seed-code"
+display_name = "Doubao Seed Code"
+provider = "volcengine"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 16384
+input_cost_per_m = 0.50
+output_cost_per_m = 1.00
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["doubao-code"]
+
+# ══════════════════════════════════════════════════════════════
+# AWS Bedrock (8)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "bedrock/anthropic.claude-opus-4-6"
+display_name = "Claude Opus 4.6 (Bedrock)"
+provider = "bedrock"
+tier = "frontier"
+context_window = 200000
+max_output_tokens = 128000
+input_cost_per_m = 5.00
+output_cost_per_m = 25.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "bedrock/anthropic.claude-sonnet-4-6"
+display_name = "Claude Sonnet 4.6 (Bedrock)"
+provider = "bedrock"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 64000
+input_cost_per_m = 3.00
+output_cost_per_m = 15.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "bedrock/anthropic.claude-opus-4-20250514"
+display_name = "Claude Opus 4 (Bedrock)"
+provider = "bedrock"
+tier = "frontier"
+context_window = 200000
+max_output_tokens = 32000
+input_cost_per_m = 15.00
+output_cost_per_m = 75.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "bedrock/anthropic.claude-sonnet-4-20250514"
+display_name = "Claude Sonnet 4 (Bedrock)"
+provider = "bedrock"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 64000
+input_cost_per_m = 3.00
+output_cost_per_m = 15.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "bedrock/anthropic.claude-haiku-4-5-20251001"
+display_name = "Claude Haiku 4.5 (Bedrock)"
+provider = "bedrock"
+tier = "fast"
+context_window = 200000
+max_output_tokens = 8192
+input_cost_per_m = 0.25
+output_cost_per_m = 1.25
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "bedrock/amazon.nova-pro-v1:0"
+display_name = "Amazon Nova Pro (Bedrock)"
+provider = "bedrock"
+tier = "smart"
+context_window = 300000
+max_output_tokens = 5120
+input_cost_per_m = 0.80
+output_cost_per_m = 3.20
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "bedrock/amazon.nova-lite-v1:0"
+display_name = "Amazon Nova Lite (Bedrock)"
+provider = "bedrock"
+tier = "fast"
+context_window = 300000
+max_output_tokens = 5120
+input_cost_per_m = 0.06
+output_cost_per_m = 0.24
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "bedrock/meta.llama3-3-70b-instruct-v1:0"
+display_name = "Llama 3.3 70B (Bedrock)"
+provider = "bedrock"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 4096
+input_cost_per_m = 0.72
+output_cost_per_m = 0.72
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+# ══════════════════════════════════════════════════════════════
+# OpenAI Codex (3)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "codex/gpt-5.4"
+display_name = "GPT-5.4 (Codex)"
+provider = "codex"
+tier = "frontier"
+context_window = 1047576
+max_output_tokens = 32768
+input_cost_per_m = 2.00
+output_cost_per_m = 8.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["codex", "codex-5.4"]
+
+[[model]]
+id = "codex/gpt-4.1"
+display_name = "GPT-4.1 (Codex)"
+provider = "codex"
+tier = "frontier"
+context_window = 1047576
+max_output_tokens = 32768
+input_cost_per_m = 2.00
+output_cost_per_m = 8.00
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["codex-4.1"]
+
+[[model]]
+id = "codex/o4-mini"
+display_name = "o4-mini (Codex)"
+provider = "codex"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 100000
+input_cost_per_m = 1.10
+output_cost_per_m = 4.40
+supports_tools = true
+supports_vision = true
+supports_streaming = true
+aliases = ["codex-o4"]
+
+# ══════════════════════════════════════════════════════════════
+# Claude Code CLI (3)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "claude-code/opus"
+display_name = "Claude Opus (CLI)"
+provider = "claude-code"
+tier = "frontier"
+context_window = 200000
+max_output_tokens = 128000
+input_cost_per_m = 5.0
+output_cost_per_m = 25.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = ["claude-code-opus"]
+
+[[model]]
+id = "claude-code/sonnet"
+display_name = "Claude Sonnet (CLI)"
+provider = "claude-code"
+tier = "smart"
+context_window = 200000
+max_output_tokens = 64000
+input_cost_per_m = 3.0
+output_cost_per_m = 15.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = ["claude-code", "claude-code-sonnet"]
+
+[[model]]
+id = "claude-code/haiku"
+display_name = "Claude Haiku (CLI)"
+provider = "claude-code"
+tier = "fast"
+context_window = 200000
+max_output_tokens = 8192
+input_cost_per_m = 0.25
+output_cost_per_m = 1.25
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = ["claude-code-haiku"]
+
+# ══════════════════════════════════════════════════════════════
+# Qwen Code CLI (3)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "qwen-code/qwen-coder-plus"
+display_name = "Qwen Coder Plus (CLI)"
+provider = "qwen-code"
+tier = "frontier"
+context_window = 131072
+max_output_tokens = 65536
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = ["qwen-coder-plus"]
+
+[[model]]
+id = "qwen-code/qwen3-coder"
+display_name = "Qwen3 Coder (CLI)"
+provider = "qwen-code"
+tier = "smart"
+context_window = 131072
+max_output_tokens = 65536
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = ["qwen-code", "qwen-coder"]
+
+[[model]]
+id = "qwen-code/qwq-32b"
+display_name = "QwQ 32B (CLI)"
+provider = "qwen-code"
+tier = "balanced"
+context_window = 131072
+max_output_tokens = 65536
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = ["qwq"]
+
+# ══════════════════════════════════════════════════════════════
+# Chutes.ai (5)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "chutes/deepseek-ai/DeepSeek-V3"
+display_name = "DeepSeek V3 (Chutes)"
+provider = "chutes"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.25
+output_cost_per_m = 0.35
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["chutes-deepseek-v3"]
+
+[[model]]
+id = "chutes/deepseek-ai/DeepSeek-R1"
+display_name = "DeepSeek R1 (Chutes)"
+provider = "chutes"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.55
+output_cost_per_m = 2.19
+supports_tools = false
+supports_vision = false
+supports_streaming = true
+aliases = ["chutes-deepseek-r1"]
+
+[[model]]
+id = "chutes/meta-llama/Llama-4-Maverick-17B-128E-Instruct"
+display_name = "Llama 4 Maverick (Chutes)"
+provider = "chutes"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.20
+output_cost_per_m = 0.30
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["chutes-llama-maverick"]
+
+[[model]]
+id = "chutes/Qwen/Qwen3-235B-A22B"
+display_name = "Qwen3 235B (Chutes)"
+provider = "chutes"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.25
+output_cost_per_m = 0.35
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["chutes-qwen3"]
+
+[[model]]
+id = "chutes/meta-llama/Llama-3.3-70B-Instruct"
+display_name = "Llama 3.3 70B (Chutes)"
+provider = "chutes"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.10
+output_cost_per_m = 0.15
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["chutes-llama-70b"]
+
+# ══════════════════════════════════════════════════════════════
+# Venice.ai (3)
+# ══════════════════════════════════════════════════════════════
+
+[[model]]
+id = "venice-uncensored"
+display_name = "Venice Uncensored"
+provider = "venice"
+tier = "fast"
+context_window = 32000
+max_output_tokens = 8192
+input_cost_per_m = 0.20
+output_cost_per_m = 0.90
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["venice"]
+
+[[model]]
+id = "llama-3.3-70b"
+display_name = "Llama 3.3 70B (Venice)"
+provider = "venice"
+tier = "balanced"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.20
+output_cost_per_m = 0.90
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []
+
+[[model]]
+id = "qwen3-235b-a22b-instruct-2507"
+display_name = "Qwen3 235B A22B (Venice)"
+provider = "venice"
+tier = "smart"
+context_window = 128000
+max_output_tokens = 8192
+input_cost_per_m = 0.20
+output_cost_per_m = 0.90
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = []

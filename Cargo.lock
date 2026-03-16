@@ -4091,6 +4091,7 @@ dependencies = [
  "tokio-stream",
  "tokio-test",
  "tokio-tungstenite 0.24.0",
+ "toml 0.8.2",
  "tracing",
  "uuid",
  "wasmtime",

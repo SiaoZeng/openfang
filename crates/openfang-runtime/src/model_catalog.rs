@@ -14,6 +14,7 @@ use openfang_types::model_catalog::{
     VOLCENGINE_BASE_URL, VOLCENGINE_CODING_BASE_URL, XAI_BASE_URL, ZAI_BASE_URL,
     ZAI_CODING_BASE_URL, ZHIPU_BASE_URL, ZHIPU_CODING_BASE_URL,
 };
+use serde::Deserialize;
 use std::collections::HashMap;
 
 /// The model catalog — registry of all known models and providers.
@@ -349,6 +350,160 @@ impl ModelCatalog {
             .map_err(|e| format!("Failed to write custom models file: {e}"))?;
         Ok(())
     }
+}
+
+/// Create a catalog from TOML catalog files, falling back to hardcoded builtins.
+///
+/// Looks for `providers.toml`, `models.toml`, and `aliases.toml` in the given
+/// directory. Any file that is missing or fails to parse is silently replaced
+/// by the hardcoded builtin data, so the catalog always boots successfully.
+pub fn load_catalog_from_dir(dir: &std::path::Path) -> ModelCatalog {
+    let providers_path = dir.join("providers.toml");
+    let models_path = dir.join("models.toml");
+    let aliases_path = dir.join("aliases.toml");
+
+    let providers = load_toml_providers(&providers_path).unwrap_or_else(builtin_providers);
+    let models = load_toml_models(&models_path).unwrap_or_else(builtin_models);
+    let mut aliases = load_toml_aliases(&aliases_path).unwrap_or_else(builtin_aliases);
+
+    // Auto-register aliases defined on model entries
+    for model in &models {
+        for alias in &model.aliases {
+            let lower = alias.to_lowercase();
+            aliases.entry(lower).or_insert_with(|| model.id.clone());
+        }
+    }
+
+    let mut catalog_providers = providers;
+    for provider in &mut catalog_providers {
+        provider.model_count = models.iter().filter(|m| m.provider == provider.id).count();
+    }
+
+    ModelCatalog {
+        models,
+        aliases,
+        providers: catalog_providers,
+    }
+}
+
+#[derive(Deserialize)]
+struct TomlProviderList {
+    #[serde(default)]
+    provider: Vec<TomlProvider>,
+}
+
+#[derive(Deserialize)]
+struct TomlProvider {
+    id: String,
+    display_name: String,
+    api_key_env: String,
+    base_url: String,
+    #[serde(default = "default_true")]
+    key_required: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn load_toml_providers(path: &std::path::Path) -> Option<Vec<ProviderInfo>> {
+    let data = std::fs::read_to_string(path).ok()?;
+    let parsed: TomlProviderList = toml::from_str(&data).ok()?;
+    Some(
+        parsed
+            .provider
+            .into_iter()
+            .map(|p| ProviderInfo {
+                id: p.id,
+                display_name: p.display_name,
+                api_key_env: p.api_key_env,
+                base_url: p.base_url,
+                key_required: p.key_required,
+                auth_status: AuthStatus::Missing,
+                model_count: 0,
+            })
+            .collect(),
+    )
+}
+
+#[derive(Deserialize)]
+struct TomlModelList {
+    #[serde(default)]
+    model: Vec<TomlModel>,
+}
+
+#[derive(Deserialize)]
+struct TomlModel {
+    id: String,
+    display_name: String,
+    provider: String,
+    #[serde(default)]
+    tier: String,
+    #[serde(default)]
+    context_window: u64,
+    #[serde(default)]
+    max_output_tokens: u64,
+    #[serde(default)]
+    input_cost_per_m: f64,
+    #[serde(default)]
+    output_cost_per_m: f64,
+    #[serde(default = "default_true")]
+    supports_tools: bool,
+    #[serde(default)]
+    supports_vision: bool,
+    #[serde(default = "default_true")]
+    supports_streaming: bool,
+    #[serde(default)]
+    aliases: Vec<String>,
+}
+
+fn parse_tier(s: &str) -> ModelTier {
+    match s {
+        "frontier" => ModelTier::Frontier,
+        "smart" => ModelTier::Smart,
+        "balanced" => ModelTier::Balanced,
+        "fast" => ModelTier::Fast,
+        "local" => ModelTier::Local,
+        "custom" => ModelTier::Custom,
+        _ => ModelTier::Balanced,
+    }
+}
+
+fn load_toml_models(path: &std::path::Path) -> Option<Vec<ModelCatalogEntry>> {
+    let data = std::fs::read_to_string(path).ok()?;
+    let parsed: TomlModelList = toml::from_str(&data).ok()?;
+    Some(
+        parsed
+            .model
+            .into_iter()
+            .map(|m| ModelCatalogEntry {
+                id: m.id,
+                display_name: m.display_name,
+                provider: m.provider,
+                tier: parse_tier(&m.tier),
+                context_window: m.context_window,
+                max_output_tokens: m.max_output_tokens,
+                input_cost_per_m: m.input_cost_per_m,
+                output_cost_per_m: m.output_cost_per_m,
+                supports_tools: m.supports_tools,
+                supports_vision: m.supports_vision,
+                supports_streaming: m.supports_streaming,
+                aliases: m.aliases,
+            })
+            .collect(),
+    )
+}
+
+#[derive(Deserialize)]
+struct TomlAliases {
+    #[serde(default)]
+    aliases: HashMap<String, String>,
+}
+
+fn load_toml_aliases(path: &std::path::Path) -> Option<HashMap<String, String>> {
+    let data = std::fs::read_to_string(path).ok()?;
+    let parsed: TomlAliases = toml::from_str(&data).ok()?;
+    Some(parsed.aliases)
 }
 
 impl Default for ModelCatalog {
@@ -4230,5 +4385,92 @@ mod tests {
         assert_eq!(entry.tier, ModelTier::Smart);
         assert!(entry.supports_tools);
         assert!(entry.supports_vision);
+    }
+
+    #[test]
+    fn test_load_catalog_from_toml_dir() {
+        let dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(
+            dir.path().join("providers.toml"),
+            r#"
+[[provider]]
+id = "test-provider"
+display_name = "Test Provider"
+api_key_env = "TEST_API_KEY"
+base_url = "http://localhost:9999/v1"
+key_required = false
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.path().join("models.toml"),
+            r#"
+[[model]]
+id = "test-model-1"
+display_name = "Test Model 1"
+provider = "test-provider"
+tier = "fast"
+context_window = 8192
+max_output_tokens = 2048
+input_cost_per_m = 0.0
+output_cost_per_m = 0.0
+supports_tools = true
+supports_vision = false
+supports_streaming = true
+aliases = ["tm1"]
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.path().join("aliases.toml"),
+            r#"
+[aliases]
+test = "test-model-1"
+"#,
+        )
+        .unwrap();
+
+        let catalog = load_catalog_from_dir(dir.path());
+        assert_eq!(catalog.list_providers().len(), 1);
+        assert_eq!(catalog.list_providers()[0].id, "test-provider");
+        assert_eq!(catalog.list_models().len(), 1);
+        assert_eq!(catalog.list_models()[0].id, "test-model-1");
+        assert_eq!(catalog.list_models()[0].tier, ModelTier::Fast);
+        assert!(catalog.find_model("tm1").is_some());
+        assert!(catalog.find_model("test").is_some());
+    }
+
+    #[test]
+    fn test_load_catalog_from_missing_dir_falls_back_to_builtins() {
+        let catalog =
+            load_catalog_from_dir(std::path::Path::new("/nonexistent/catalog/path/xyz"));
+        assert_eq!(catalog.list_providers().len(), 41);
+        assert!(catalog.list_models().len() >= 30);
+    }
+
+    #[test]
+    fn test_load_catalog_partial_files_uses_fallback_per_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // Only providers.toml present — models and aliases should fall back to builtins
+        std::fs::write(
+            dir.path().join("providers.toml"),
+            r#"
+[[provider]]
+id = "solo-provider"
+display_name = "Solo"
+api_key_env = "SOLO_KEY"
+base_url = "http://localhost:1234"
+key_required = false
+"#,
+        )
+        .unwrap();
+
+        let catalog = load_catalog_from_dir(dir.path());
+        // Providers from TOML (1), models and aliases from builtins
+        assert_eq!(catalog.list_providers().len(), 1);
+        assert!(catalog.list_models().len() >= 30); // builtins
     }
 }

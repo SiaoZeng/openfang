@@ -840,8 +840,27 @@ impl OpenFangKernel {
             info!("RBAC enabled with {} users", auth.user_count());
         }
 
-        // Initialize model catalog, detect provider auth, and apply URL overrides
-        let mut model_catalog = openfang_runtime::model_catalog::ModelCatalog::new();
+        // Initialize model catalog from TOML catalog files, falling back to builtins.
+        // Search order: ~/.openfang/catalog/ → <exe_dir>/catalog/ → builtin hardcoded.
+        let mut model_catalog = {
+            let home_catalog = config.home_dir.join("catalog");
+            let exe_catalog = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("catalog")));
+            if home_catalog.is_dir() {
+                info!(path = %home_catalog.display(), "loading model catalog from TOML");
+                openfang_runtime::model_catalog::load_catalog_from_dir(&home_catalog)
+            } else if let Some(ref exe_cat) = exe_catalog {
+                if exe_cat.is_dir() {
+                    info!(path = %exe_cat.display(), "loading model catalog from TOML");
+                    openfang_runtime::model_catalog::load_catalog_from_dir(exe_cat)
+                } else {
+                    openfang_runtime::model_catalog::ModelCatalog::new()
+                }
+            } else {
+                openfang_runtime::model_catalog::ModelCatalog::new()
+            }
+        };
         model_catalog.detect_auth();
         if !config.provider_urls.is_empty() {
             model_catalog.apply_url_overrides(&config.provider_urls);
