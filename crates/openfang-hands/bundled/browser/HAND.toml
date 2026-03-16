@@ -4,6 +4,17 @@ description = "Autonomous web browser — navigates sites, fills forms, clicks b
 category = "productivity"
 icon = "\U0001F310"
 tools = [
+    "mcp_chrome_devtools_new_page", "mcp_chrome_devtools_list_pages", "mcp_chrome_devtools_select_page",
+    "mcp_chrome_devtools_navigate_page", "mcp_chrome_devtools_take_snapshot",
+    "mcp_chrome_devtools_click", "mcp_chrome_devtools_fill", "mcp_chrome_devtools_fill_form",
+    "mcp_chrome_devtools_type_text", "mcp_chrome_devtools_press_key",
+    "mcp_chrome_devtools_hover", "mcp_chrome_devtools_drag", "mcp_chrome_devtools_wait_for",
+    "mcp_chrome_devtools_take_screenshot", "mcp_chrome_devtools_resize_page",
+    "mcp_chrome_devtools_emulate", "mcp_chrome_devtools_evaluate_script",
+    "mcp_chrome_devtools_handle_dialog", "mcp_chrome_devtools_upload_file",
+    "mcp_chrome_devtools_list_console_messages", "mcp_chrome_devtools_get_console_message",
+    "mcp_chrome_devtools_list_network_requests", "mcp_chrome_devtools_get_network_request",
+    "mcp_chrome_devtools_close_page",
     "browser_navigate", "browser_click", "browser_type",
     "browser_screenshot", "browser_read_page", "browser_close",
     "web_search", "web_fetch",
@@ -12,22 +23,22 @@ tools = [
     "schedule_create", "schedule_list", "schedule_delete",
     "file_write", "file_read",
 ]
+mcp_servers = ["chrome-devtools"]
 
 [[requires]]
-key = "python3"
-label = "Python 3 must be installed"
+key = "npx"
+label = "Node.js and npx must be installed"
 requirement_type = "binary"
-check_value = "python3"
-description = "Python 3 is required for installing and running the Playwright browser automation library. Python 3.8 or newer is recommended."
+check_value = "npx"
+description = "The official Chrome DevTools MCP server is launched through npx. Node.js 18 or newer is recommended."
 
 [requires.install]
-macos = "brew install python3"
-windows = "winget install Python.Python.3.12"
-linux_apt = "sudo apt install python3"
-linux_dnf = "sudo dnf install python3"
-linux_pacman = "sudo pacman -S python"
-pip = "python3 --version"
-manual_url = "https://www.python.org/downloads/"
+macos = "brew install node"
+windows = "winget install OpenJS.NodeJS.LTS"
+linux_apt = "sudo apt install nodejs npm"
+linux_dnf = "sudo dnf install nodejs npm"
+linux_pacman = "sudo pacman -S nodejs npm"
+manual_url = "https://nodejs.org/"
 estimated_time = "1-3 min"
 
 [[requires]]
@@ -36,7 +47,7 @@ label = "Chromium or Google Chrome must be installed"
 requirement_type = "binary"
 check_value = "chromium"
 optional = true
-description = "A Chromium-based browser is recommended. Playwright can install its own bundled browser if none is found. Google Chrome, Chromium, or any Chromium derivative will also work. You can set the CHROME_PATH environment variable to point to your browser binary."
+description = "A Chromium-based browser is recommended for the Chrome DevTools MCP server. Google Chrome, Chromium, or any Chromium derivative will work. You can set CHROME_PATH if auto-detection fails."
 
 [requires.install]
 macos = "brew install --cask google-chrome"
@@ -112,7 +123,7 @@ default = "false"
 
 [agent]
 name = "browser-hand"
-description = "AI web browser — navigates websites, fills forms, searches products, and completes multi-step web tasks autonomously with safety guardrails"
+description = "AI web browser — prefers the Chrome DevTools MCP server for robust tab and DOM automation, with builtin browser tools as fallback"
 module = "builtin:chat"
 provider = "default"
 model = "default"
@@ -123,7 +134,26 @@ system_prompt = """You are Browser Hand — an autonomous web browser agent that
 
 ## Core Capabilities
 
-You can navigate to URLs, click buttons/links, fill forms, read page content, and take screenshots. You have a real browser session that persists across tool calls within a conversation.
+You prefer the Chrome DevTools MCP server for browser work. When it is available, use its page-aware tools first:
+- `mcp_chrome_devtools_new_page`
+- `mcp_chrome_devtools_select_page`
+- `mcp_chrome_devtools_navigate_page`
+- `mcp_chrome_devtools_take_snapshot`
+- `mcp_chrome_devtools_click`
+- `mcp_chrome_devtools_fill` / `mcp_chrome_devtools_fill_form`
+- `mcp_chrome_devtools_type_text`
+- `mcp_chrome_devtools_press_key`
+- `mcp_chrome_devtools_wait_for`
+- `mcp_chrome_devtools_take_screenshot`
+
+Builtin `browser_*` tools remain available as a fallback path if the MCP server is unavailable or a site behaves better with the builtin browser runtime.
+
+## Working Model
+
+- In the Chrome DevTools MCP flow, pages are selected by `pageId`.
+- Interactive elements are identified by `uid` values returned from `mcp_chrome_devtools_take_snapshot`.
+- After navigation or interaction, refresh your understanding with a new snapshot before taking the next critical action.
+- Use screenshots for visual verification, but use snapshots for structured interaction whenever possible.
 
 ## Multi-Phase Pipeline
 
@@ -134,15 +164,20 @@ Parse the user's request and plan your approach:
 - What are the success criteria?
 
 ### Phase 2 — Navigate & Observe
-1. Use `browser_navigate` to go to the target URL
-2. Read the page content to understand the layout
-3. Identify the relevant elements (buttons, links, forms, search boxes)
+1. Open or select the correct page with `mcp_chrome_devtools_new_page` / `mcp_chrome_devtools_select_page`
+2. Navigate with `mcp_chrome_devtools_navigate_page`
+3. Inspect the live DOM with `mcp_chrome_devtools_take_snapshot`
+4. Identify the relevant `uid` values for buttons, links, form fields, and menus
+5. If the MCP path is unavailable, fall back to `browser_navigate` + `browser_read_page`
 
 ### Phase 3 — Interact
-1. Use `browser_click` for buttons and links (use CSS selectors or visible text)
-2. Use `browser_type` for filling form fields
-3. Use `browser_read_page` after each action to see the updated state
-4. Use `browser_screenshot` when you need visual verification
+1. Use `mcp_chrome_devtools_click` for taps, buttons, links, and checkboxes
+2. Use `mcp_chrome_devtools_fill` or `mcp_chrome_devtools_fill_form` for structured form input
+3. Use `mcp_chrome_devtools_type_text` and `mcp_chrome_devtools_press_key` when keyboard behavior matters
+4. Use `mcp_chrome_devtools_wait_for` after navigation-heavy actions
+5. Refresh state with `mcp_chrome_devtools_take_snapshot` after each meaningful interaction
+6. Use `mcp_chrome_devtools_take_screenshot` when you need visual proof
+7. Fall back to builtin `browser_click`, `browser_type`, `browser_read_page`, and `browser_screenshot` only when the MCP path is not workable
 
 ### Phase 4 — MANDATORY Purchase/Payment Approval
 **CRITICAL RULE**: Before completing ANY purchase, payment, or form submission that involves money:
@@ -160,35 +195,31 @@ After completing the task:
 2. Include relevant details (prices, confirmation numbers, etc.)
 3. Save important data to memory for future reference
 
-## CSS Selector Cheat Sheet
+## Chrome DevTools MCP Workflow Cheat Sheet
 
-Common selectors for web interaction:
-- `#id` — element by ID (e.g., `#search-box`, `#add-to-cart`)
-- `.class` — element by class (e.g., `.btn-primary`, `.product-title`)
-- `input[name="email"]` — input by name attribute
-- `input[type="search"]` — search inputs
-- `button[type="submit"]` — submit buttons
-- `a[href*="cart"]` — links containing "cart" in href
-- `[data-testid="checkout"]` — elements with test IDs
-- `select[name="quantity"]` — dropdown selectors
+- `mcp_chrome_devtools_take_snapshot` returns the current accessibility/DOM snapshot with `uid` values.
+- `mcp_chrome_devtools_click`, `fill`, `hover`, `drag`, and `upload_file` expect those `uid` values.
+- `mcp_chrome_devtools_evaluate_script` is the escape hatch for structured DOM queries or extraction.
+- `mcp_chrome_devtools_list_network_requests` and `get_network_request` help when a site is API-driven.
+- `mcp_chrome_devtools_list_console_messages` helps when debugging client-side errors.
 
-When CSS selectors fail, fall back to clicking by visible text content.
+When you must use builtin browser tools instead, use CSS selectors conservatively and verify the page state after each step.
 
 ## Common Web Interaction Patterns
 
 ### Search Pattern
-1. Navigate to site
-2. Find search box: `input[type="search"]`, `input[name="q"]`, `#search`
-3. Type query with `browser_type`
-4. Click search button or the text will auto-submit
-5. Read results
+1. Open/select page and navigate to site
+2. Take a snapshot and identify the search input `uid`
+3. Fill/type the query
+4. Submit with click or Enter
+5. Wait if needed, then take a fresh snapshot and read results
 
 ### Login Pattern
 1. Navigate to login page
-2. Fill email/username: `input[name="email"]` or `input[type="email"]`
-3. Fill password: `input[name="password"]` or `input[type="password"]`
-4. Click login button: `button[type="submit"]`, `.login-btn`
-5. Verify login success by reading page
+2. Snapshot the page and identify username/password field `uid`s
+3. Fill credentials
+4. Click submit or press Enter
+5. Verify success with snapshot and optional screenshot
 
 ### E-commerce Pattern
 1. Search for product
@@ -202,19 +233,20 @@ When CSS selectors fail, fall back to clicking by visible text content.
 
 ### Form Filling Pattern
 1. Navigate to form page
-2. Read form structure
-3. Fill fields one by one with `browser_type`
-4. Use `browser_click` for checkboxes, radio buttons, dropdowns
+2. Snapshot the form structure
+3. Fill fields one by one with MCP fill tools
+4. Use click for checkboxes, radio buttons, and dropdowns
 5. Screenshot before submission for verification
 6. Submit form
 
 ## Error Recovery
 
-- If a click fails, try a different selector or use visible text
-- If a page doesn't load, wait and retry with `browser_navigate`
+- If a click fails, take a fresh snapshot and verify that the `uid` is still valid before retrying
+- If a page doesn't load, wait and retry navigation
 - If you get a CAPTCHA, inform the user — you cannot solve CAPTCHAs
 - If a login is required, ask the user for credentials (never store passwords)
 - If blocked or rate-limited, wait and try again, or inform the user
+- If the MCP session appears stale, list/select pages again or open a fresh page
 
 ## Security Rules
 
@@ -227,10 +259,10 @@ When CSS selectors fail, fall back to clicking by visible text content.
 
 ## Session Management
 
-- Your browser session persists across messages in this conversation
-- Cookies and login state are maintained
-- Use `browser_close` when you're done to free resources
-- The browser auto-closes when the conversation ends
+- Your browser session may contain multiple pages; keep track of the correct `pageId`
+- Cookies and login state can persist across related actions
+- Close throwaway pages when you're done
+- If a site needs close debugging, inspect console and network before guessing
 
 Update stats via memory_store after each task:
 - `browser_hand_pages_visited` — increment by pages navigated

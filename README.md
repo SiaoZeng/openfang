@@ -6,7 +6,7 @@
 <h3 align="center">The Agent Operating System</h3>
 
 <p align="center">
-  Open-source Agent OS built in Rust. 137K LOC. 14 crates. 1,767+ tests. Zero clippy warnings.<br/>
+  Open-source Agent OS built in Rust. 137K LOC. 14 crates. 2,252+ tests. Zero clippy warnings.<br/>
   <strong>One binary. Battle-tested. Agents that actually work for you.</strong>
 </p>
 
@@ -20,7 +20,7 @@
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
   <img src="https://img.shields.io/badge/version-0.3.30-green?style=flat-square" alt="v0.3.30" />
-  <img src="https://img.shields.io/badge/tests-1,767%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/tests-2%2C252%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
   <a href="https://www.buymeacoffee.com/openfang" target="_blank"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat-square&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee" /></a>
 </p>
@@ -75,7 +75,7 @@ Each Hand bundles:
 
 All compiled into the binary. No downloading, no pip install, no Docker pull.
 
-### The 7 Bundled Hands
+### The 8 Bundled Hands
 
 | Hand | What It Actually Does |
 |------|----------------------|
@@ -83,6 +83,7 @@ All compiled into the binary. No downloading, no pip install, no Docker pull.
 | **Lead** | Runs daily. Discovers prospects matching your ICP, enriches them with web research, scores 0-100, deduplicates against your existing database, and delivers qualified leads in CSV/JSON/Markdown. Builds ICP profiles over time. |
 | **Collector** | OSINT-grade intelligence. You give it a target (company, person, topic). It monitors continuously — change detection, sentiment tracking, knowledge graph construction, and critical alerts when something important shifts. |
 | **Predictor** | Superforecasting engine. Collects signals from multiple sources, builds calibrated reasoning chains, makes predictions with confidence intervals, and tracks its own accuracy using Brier scores. Has a contrarian mode that deliberately argues against consensus. |
+| **Trader** | Autonomous market intelligence and trading engine. Scans stocks or crypto with multi-signal analysis, pits bull and bear theses against each other, scores confidence, enforces risk limits, and can require approval before any live trade. |
 | **Researcher** | Deep autonomous researcher. Cross-references multiple sources, evaluates credibility using CRAAP criteria (Currency, Relevance, Authority, Accuracy, Purpose), generates cited reports with APA formatting, supports multiple languages. |
 | **Twitter** | Autonomous Twitter/X account manager. Creates content in 7 rotating formats, schedules posts for optimal engagement, responds to mentions, tracks performance metrics. Has an approval queue — nothing posts without your OK. |
 | **Browser** | Web automation agent. Navigates sites, fills forms, clicks buttons, handles multi-step workflows. Uses Playwright bridge with session persistence. **Mandatory purchase approval gate** — it will never spend your money without explicit confirmation. |
@@ -105,6 +106,41 @@ openfang hand list
 ```
 
 **Build your own.** Define a `HAND.toml` with tools, settings, and a system prompt. Publish to FangHub.
+
+---
+
+## Capability Builder: Grow The System Safely
+
+OpenFang does not stop at routing existing capabilities. When a goal does not fit any current Hand, workflow, or specialist agent well enough, the native router can now surface a reviewable draft instead of quietly dumping everything onto the fallback assistant.
+
+The builder flow is approval-driven:
+
+- analyze a goal against the routing capability registry
+- draft a new `agent`, `workflow`, or `hand`
+- create a tracked apply job
+- require explicit approval before creation or activation
+
+You can use it from the dashboard, the TUI, the API, or the CLI:
+
+```bash
+# Analyze whether the goal needs a new capability
+openfang builder analyze "automate contract renewal approval escalation weekly"
+
+# Submit the draft for approval-backed creation
+openfang builder submit "automate contract renewal approval escalation weekly"
+
+# Approve the queued creation request
+openfang approvals approve <APPROVAL_ID>
+
+# Track the builder apply job
+openfang builder job <JOB_ID>
+```
+
+This is the beginning of the Agent OS expansion loop:
+
+1. route goals to what already exists
+2. detect when nothing is good enough
+3. expand the system with user approval instead of ad-hoc prompt hacks
 
 ---
 
@@ -235,12 +271,12 @@ OpenFang doesn't bolt security on after the fact. Every layer is independently t
 ```
 openfang-kernel      Orchestration, workflows, metering, RBAC, scheduler, budget tracking
 openfang-runtime     Agent loop, 3 LLM drivers, 53 tools, WASM sandbox, MCP, A2A
-openfang-api         140+ REST/WS/SSE endpoints, OpenAI-compatible API, dashboard
+openfang-api         170+ REST/WS/SSE endpoints, OpenAI-compatible API, dashboard
 openfang-channels    40 messaging adapters with rate limiting, DM/group policies
 openfang-memory      SQLite persistence, vector embeddings, canonical sessions, compaction
 openfang-types       Core types, taint tracking, Ed25519 manifest signing, model catalog
 openfang-skills      60 bundled skills, SKILL.md parser, FangHub marketplace
-openfang-hands       7 autonomous Hands, HAND.toml parser, lifecycle management
+openfang-hands       8 autonomous Hands, HAND.toml parser, lifecycle management
 openfang-extensions  25 MCP templates, AES-256-GCM credential vault, OAuth2 PKCE
 openfang-wire        OFP P2P protocol with HMAC-SHA256 mutual authentication
 openfang-cli         CLI with daemon management, TUI dashboard, MCP server mode
@@ -400,7 +436,7 @@ curl -X POST localhost:4200/v1/chat/completions \
   }'
 ```
 
-140+ REST/WS/SSE endpoints covering agents, memory, workflows, channels, models, skills, A2A, Hands, and more.
+170+ REST/WS/SSE endpoints covering agents, memory, workflows, routing/builder jobs, channels, models, skills, A2A, Hands, and more.
 
 ---
 
@@ -448,7 +484,7 @@ openfang start
 # Build the workspace
 cargo build --workspace --lib
 
-# Run all tests (1,767+)
+# Run all tests (2,252+)
 cargo test --workspace
 
 # Lint (must be 0 warnings)

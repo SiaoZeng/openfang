@@ -18,6 +18,7 @@ function schedulerPage() {
     // -- Run History state --
     history: [],
     historyLoading: false,
+    historyLoadError: '',
 
     // -- Create Job form --
     showCreateForm: false,
@@ -102,7 +103,12 @@ function schedulerPage() {
 
     async loadHistory() {
       this.historyLoading = true;
+      this.historyLoadError = '';
       try {
+        await Promise.all([
+          this.loadJobs(),
+          this.loadTriggers()
+        ]);
         var historyItems = [];
         var jobs = this.jobs || [];
         for (var i = 0; i < jobs.length; i++) {
@@ -136,6 +142,7 @@ function schedulerPage() {
         this.history = historyItems;
       } catch(e) {
         this.history = [];
+        this.historyLoadError = e.message || 'Could not load run history.';
       }
       this.historyLoading = false;
     },
@@ -209,7 +216,7 @@ function schedulerPage() {
           OpenFangToast.error('Schedule run failed: ' + (result.error || 'Unknown error'));
         }
       } catch(e) {
-        OpenFangToast.error('Run Now is not yet available for cron jobs');
+        OpenFangToast.error('Failed to run schedule: ' + (e.message || e));
       }
       this.runningJobId = '';
     },

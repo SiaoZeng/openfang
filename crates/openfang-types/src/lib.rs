@@ -5,6 +5,7 @@
 
 pub mod agent;
 pub mod approval;
+pub mod backup;
 pub mod capability;
 pub mod comms;
 pub mod config;

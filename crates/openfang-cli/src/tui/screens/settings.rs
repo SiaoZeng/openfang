@@ -570,7 +570,16 @@ fn draw_tools(f: &mut Frame, area: Rect, state: &mut SettingsState) {
         chunks[0],
     );
 
-    if state.tools.is_empty() {
+    if state.loading && state.tools.is_empty() {
+        let spinner = theme::SPINNER_FRAMES[state.tick % theme::SPINNER_FRAMES.len()];
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!("  {spinner} "), Style::default().fg(theme::CYAN)),
+                Span::styled("Loading tools\u{2026}", theme::dim_style()),
+            ])),
+            chunks[1],
+        );
+    } else if state.tools.is_empty() {
         f.render_widget(
             Paragraph::new(Span::styled("  No tools available.", theme::dim_style())),
             chunks[1],

@@ -9,7 +9,10 @@ All responses include security headers (CSP, X-Frame-Options, X-Content-Type-Opt
 - [Authentication](#authentication)
 - [Agent Endpoints](#agent-endpoints)
 - [Workflow Endpoints](#workflow-endpoints)
+- [Routing & Builder Endpoints](#routing--builder-endpoints)
 - [Trigger Endpoints](#trigger-endpoints)
+- [Comms Endpoints](#comms-endpoints)
+- [Cron Endpoints](#cron-endpoints)
 - [Memory Endpoints](#memory-endpoints)
 - [Channel Endpoints](#channel-endpoints)
 - [Template Endpoints](#template-endpoints)
@@ -361,6 +364,176 @@ List execution history for a workflow.
 
 ---
 
+## Routing & Builder Endpoints
+
+### GET /api/routing/capabilities
+
+List routing-visible system capabilities. These records are the explicit routing substrate used by the native router when evaluating Hands, workflows, and specialist agents.
+
+**Response** `200 OK`:
+
+```json
+{
+  "capabilities": [
+    {
+      "kind": "Hand",
+      "id": "browser",
+      "name": "Browser Hand",
+      "description": "Navigate websites and interact with forms",
+      "tags": ["hand", "hand:browser", "category:development"],
+      "keywords": ["browser", "website", "navigate", "screenshot"],
+      "target": {
+        "Hand": {
+          "hand_id": "browser"
+        }
+      }
+    }
+  ],
+  "total": 1
+}
+```
+
+### POST /api/routing/proposals
+
+Analyze a goal for a capability gap. If no existing capability is suitable, OpenFang returns a reviewable proposal draft for an `agent`, `workflow`, or `hand`.
+
+**Request Body**:
+
+```json
+{
+  "message": "automate contract renewal approval escalation weekly"
+}
+```
+
+**Response** `200 OK`:
+
+```json
+{
+  "gap_detected": true,
+  "reason": "no existing capability matched at least 2 shared keywords with score >= 0.42",
+  "threshold_min_keywords": 2,
+  "threshold_min_score": 0.42,
+  "top_matches": [
+    {
+      "kind": "Hand",
+      "id": "browser",
+      "name": "Browser Hand",
+      "score": 0.22,
+      "matched_keywords": ["approval"]
+    }
+  ],
+  "proposal": {
+    "kind": "workflow",
+    "name": "automate-contract-renewal-approval",
+    "description": "Workflow for automate contract renewal approval escalation weekly",
+    "rationale": "best existing match was 'Browser Hand' with score 0.22; below the builder threshold",
+    "approval_required": true
+  }
+}
+```
+
+### POST /api/routing/proposals/apply
+
+Submit a proposal for approval-backed creation. This creates:
+
+- a builder apply job
+- a normal approval request under `/api/approvals`
+
+**Request Body**:
+
+```json
+{
+  "proposal": {
+    "kind": "workflow",
+    "name": "automate-contract-renewal-approval",
+    "description": "Workflow for automate contract renewal approval escalation weekly",
+    "rationale": "best existing match was 'Browser Hand' with score 0.22; below the builder threshold",
+    "approval_required": true
+  },
+  "activate_after_create": false
+}
+```
+
+**Response** `201 Created`:
+
+```json
+{
+  "job_id": "688aae20-8c17-4e03-bf31-cb3f3bad10a0",
+  "approval_id": "cb89090f-8d07-4a47-be8e-c97a331e0322",
+  "status": "pending_approval"
+}
+```
+
+### GET /api/routing/proposals/jobs
+
+List capability-builder apply jobs.
+
+**Response** `200 OK`:
+
+```json
+{
+  "jobs": [
+    {
+      "job_id": "688aae20-8c17-4e03-bf31-cb3f3bad10a0",
+      "approval_id": "cb89090f-8d07-4a47-be8e-c97a331e0322",
+      "status": "applied",
+      "proposal": {
+        "kind": "workflow",
+        "name": "automate-contract-renewal-approval"
+      },
+      "outcome": {
+        "kind": "workflow",
+        "workflow_id": "eeb805dd-3792-4a68-a7b4-e2c7d135f81d",
+        "name": "automate-contract-renewal-approval"
+      }
+    }
+  ],
+  "total": 1
+}
+```
+
+### GET /api/routing/proposals/jobs/{id}
+
+Fetch a single builder apply job, including current status, proposal details, and outcome or error.
+
+**Response** `200 OK`:
+
+```json
+{
+  "job_id": "688aae20-8c17-4e03-bf31-cb3f3bad10a0",
+  "approval_id": "cb89090f-8d07-4a47-be8e-c97a331e0322",
+  "status": "applied",
+  "proposal": {
+    "kind": "workflow",
+    "name": "automate-contract-renewal-approval",
+    "description": "Workflow for automate contract renewal approval escalation weekly"
+  },
+  "outcome": {
+    "kind": "workflow",
+    "workflow_id": "eeb805dd-3792-4a68-a7b4-e2c7d135f81d",
+    "name": "automate-contract-renewal-approval"
+  },
+  "error": null
+}
+```
+
+Builder job statuses:
+
+- `pending_approval`
+- `applying`
+- `applied`
+- `rejected`
+- `timed_out`
+- `failed`
+
+The approval step is resolved via the existing approvals endpoints:
+
+- `GET /api/approvals`
+- `POST /api/approvals/{id}/approve`
+- `POST /api/approvals/{id}/reject`
+
+---
+
 ## Trigger Endpoints
 
 ### GET /api/triggers
@@ -457,6 +630,289 @@ Remove a trigger.
 {
   "status": "removed",
   "trigger_id": "t1b2c3d4-..."
+}
+```
+
+---
+
+## Comms Endpoints
+
+### POST /api/comms/send
+
+Send communication from an existing agent either:
+- to another OpenFang agent
+- to a configured channel recipient
+
+Exactly one delivery target is required:
+- `to_agent_id`
+- or `channel`
+
+`thread_id` applies to channel deliveries. Attachments are uploaded file references produced by `POST /api/agents/{id}/upload`.
+
+**Request Body**:
+
+```json
+{
+  "from_agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "channel": "telegram",
+  "recipient": "123456789",
+  "message": "Here is the report",
+  "thread_id": "42",
+  "attachments": [
+    {
+      "file_id": "f1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "filename": "report.pdf",
+      "content_type": "application/pdf"
+    }
+  ]
+}
+```
+
+**Agent target example**:
+
+```json
+{
+  "from_agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "to_agent_id": "b1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "message": "Review this note",
+  "attachments": [
+    {
+      "file_id": "f1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "filename": "diagram.png",
+      "content_type": "image/png"
+    }
+  ]
+}
+```
+
+When targeting another agent, only image attachments are currently supported. Uploaded images are injected into the recipient session before the text message is delivered.
+
+**Response** `200 OK` for agent delivery:
+
+```json
+{
+  "ok": true,
+  "mode": "agent",
+  "response": "Reviewed.",
+  "input_tokens": 123,
+  "output_tokens": 45,
+  "attachments_received": 1
+}
+```
+
+**Response** `200 OK` for channel delivery:
+
+```json
+{
+  "ok": true,
+  "mode": "channel",
+  "channel": "telegram",
+  "recipient": "123456789",
+  "thread_id": "42",
+  "message_sent": true,
+  "attachments_sent": 1,
+  "results": [
+    "Message sent to 123456789 via telegram",
+    "File 'report.pdf' sent to 123456789 via telegram"
+  ]
+}
+```
+
+**Response** `400 Bad Request`:
+
+```json
+{
+  "error": "Provide exactly one delivery target: either to_agent_id or channel"
+}
+```
+
+### POST /api/comms/task
+
+Post a task to the shared task queue.
+
+**Request Body**:
+
+```json
+{
+  "title": "Review incident summary",
+  "description": "Check the latest error cluster",
+  "assigned_to": "agent-name-or-id"
+}
+```
+
+**Response** `201 Created`:
+
+```json
+{
+  "ok": true,
+  "task_id": "t1b2c3d4-..."
+}
+```
+
+---
+
+## Cron Endpoints
+
+### GET /api/cron/jobs
+
+List scheduled jobs. Optionally filter by agent.
+
+**Query Parameters:**
+- `agent_id` (optional): Filter by agent UUID
+
+**Response** `200 OK` on a clean restore:
+
+```json
+{
+  "jobs": [
+    {
+      "id": "c1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "daily-report",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "expr": "0 9 * * 1-5",
+        "tz": null
+      },
+      "action": {
+        "kind": "agent_turn",
+        "message": "Prepare the daily report",
+        "model_override": null,
+        "timeout_secs": null
+      },
+      "delivery": {
+        "kind": "none"
+      },
+      "created_at": "2025-01-15T10:30:00Z",
+      "last_run": null,
+      "next_run": "2025-01-16T09:00:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+**Response** `500 Internal Server Error` on a partial restore:
+
+The response body still includes `restored_files`, `errors`, and `manifest` so callers can inspect which files failed.
+
+### POST /api/cron/jobs
+
+Create a new scheduled job.
+
+**Request Body**:
+
+```json
+{
+  "agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "daily-report",
+  "schedule": {
+    "kind": "cron",
+    "expr": "0 9 * * 1-5"
+  },
+  "action": {
+    "kind": "agent_turn",
+    "message": "Prepare the daily report"
+  },
+  "delivery": {
+    "kind": "none"
+  }
+}
+```
+
+**Response** `201 Created`:
+
+```json
+{
+  "result": "{\"job_id\":\"c1b2c3d4-e5f6-7890-abcd-ef1234567890\",\"status\":\"created\"}"
+}
+```
+
+### PUT /api/cron/jobs/{id}
+
+Patch an existing scheduled job in place. Omitted fields remain unchanged.
+
+Supported patch fields:
+- `name`
+- `enabled`
+- `agent_id`
+- `schedule`
+- `action`
+- `delivery`
+
+**Request Body**:
+
+```json
+{
+  "name": "heartbeat-job",
+  "enabled": false,
+  "schedule": {
+    "kind": "every",
+    "every_secs": 900
+  },
+  "action": {
+    "kind": "system_event",
+    "text": "heartbeat"
+  },
+  "delivery": {
+    "kind": "webhook",
+    "url": "https://example.com/hook"
+  }
+}
+```
+
+**Response** `200 OK`:
+
+```json
+{
+  "id": "c1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "heartbeat-job",
+  "enabled": false,
+  "schedule": {
+    "kind": "every",
+    "every_secs": 900
+  },
+  "action": {
+    "kind": "system_event",
+    "text": "heartbeat"
+  },
+  "delivery": {
+    "kind": "webhook",
+    "url": "https://example.com/hook"
+  },
+  "created_at": "2025-01-15T10:30:00Z",
+  "last_run": null,
+  "next_run": "2025-01-15T10:45:00Z"
+}
+```
+
+**Response** `400 Bad Request`:
+
+```json
+{
+  "error": "every_secs too small (30, min 60)"
+}
+```
+
+**Response** `404 Not Found`:
+
+```json
+{
+  "error": "Cron job c1b2c3d4-e5f6-7890-abcd-ef1234567890 not found"
+}
+```
+
+### DELETE /api/cron/jobs/{id}
+
+Delete a scheduled job.
+
+**Response** `200 OK`:
+
+```json
+{
+  "status": "deleted"
 }
 ```
 
@@ -713,6 +1169,105 @@ Initiate graceful shutdown. Agent states are preserved to SQLite for restore on 
 }
 ```
 
+### POST /api/backup
+
+Create a timestamped backup archive under `~/.openfang/backups/`.
+
+The archive contains persisted OpenFang state such as:
+- `config.toml`
+- `data/`
+- `agents/`
+- `skills/`
+- `workspaces/`
+- workflow files and other home-relative persisted state when configured under `home_dir`
+
+If `data_dir`, `workspaces_dir`, or `workflows_dir` are configured outside `home_dir`, those components are omitted and recorded in the backup manifest.
+
+**Response** `200 OK`:
+
+```json
+{
+  "filename": "openfang_backup_20260316_153045.zip",
+  "path": "/home/user/.openfang/backups/openfang_backup_20260316_153045.zip",
+  "size_bytes": 182734,
+  "created_at": "2026-03-16T15:30:45Z",
+  "components": ["config", "data", "workspaces"],
+  "omitted_components": []
+}
+```
+
+### GET /api/backups
+
+List backup archives stored under `~/.openfang/backups/`.
+
+**Response** `200 OK`:
+
+```json
+{
+  "backups": [
+    {
+      "filename": "openfang_backup_20260316_153045.zip",
+      "path": "/home/user/.openfang/backups/openfang_backup_20260316_153045.zip",
+      "size_bytes": 182734,
+      "modified_at": "2026-03-16T15:30:45Z",
+      "created_at": "2026-03-16T15:30:45Z",
+      "components": ["config", "data", "workspaces"],
+      "omitted_components": [],
+      "openfang_version": "0.4.4"
+    }
+  ],
+  "total": 1
+}
+```
+
+### DELETE /api/backups/{filename}
+
+Delete a previously created backup archive by filename.
+
+**Response** `200 OK`:
+
+```json
+{
+  "deleted": "openfang_backup_20260316_153045.zip"
+}
+```
+
+### POST /api/restore
+
+Restore persisted OpenFang state from a backup archive stored under `~/.openfang/backups/`.
+
+Restore overwrites persisted files on disk but does not hot-reload the running daemon. Restart the daemon after a successful restore so configuration, database state, workflows, and workspace-backed state are reloaded consistently.
+
+**Request Body**:
+
+```json
+{
+  "filename": "openfang_backup_20260316_153045.zip"
+}
+```
+
+**Response** `200 OK`:
+
+```json
+{
+  "restored_files": 12,
+  "errors": [],
+  "manifest": {
+    "format_version": 1,
+    "product": "openfang",
+    "created_at": "2026-03-16T15:30:45Z",
+    "hostname": "devbox",
+    "openfang_version": "0.4.4",
+    "components": ["config", "data", "workspaces"],
+    "omitted_components": [],
+    "archive_files": ["config.toml"],
+    "archive_directories": ["data", "workspaces"]
+  },
+  "restart_required": true,
+  "message": "Restore complete. Restart the daemon for all changes to take effect."
+}
+```
+
 ### GET /api/profiles
 
 List available agent profiles (predefined configurations for common use cases).
@@ -720,19 +1275,28 @@ List available agent profiles (predefined configurations for common use cases).
 **Response** `200 OK`:
 
 ```json
+[
+  {
+    "name": "minimal",
+    "tools": ["file_read", "file_list"]
+  },
+  {
+    "name": "coding",
+    "tools": ["file_read", "file_write", "file_list", "shell_exec"]
+  }
+]
+```
+
+### GET /api/profiles/{name}
+
+Get a single tool profile by name.
+
+**Response** `200 OK`:
+
+```json
 {
-  "profiles": [
-    {
-      "name": "coder",
-      "tier": "smart",
-      "description": "Expert coding assistant"
-    },
-    {
-      "name": "researcher",
-      "tier": "frontier",
-      "description": "Deep research and analysis"
-    }
-  ]
+  "name": "research",
+  "tools": ["web_search", "web_fetch", "file_read"]
 }
 ```
 
@@ -745,17 +1309,32 @@ List all available tools that agents can use.
 ```json
 {
   "tools": [
-    "file_read",
-    "file_write",
-    "file_list",
-    "web_fetch",
-    "web_search",
-    "shell_exec",
-    "kv_get",
-    "kv_set",
-    "agent_call"
+    {
+      "name": "file_read",
+      "description": "Read a UTF-8 text file from the workspace",
+      "input_schema": {
+        "type": "object"
+      }
+    }
   ],
-  "total": 23
+  "total": 1
+}
+```
+
+### GET /api/tools/{name}
+
+Get a single tool definition by name.
+
+**Response** `200 OK`:
+
+```json
+{
+  "name": "file_read",
+  "description": "Read a UTF-8 text file from the workspace",
+  "input_schema": {
+    "type": "object"
+  },
+  "source": "builtin"
 }
 ```
 
@@ -1267,13 +1846,22 @@ List configured and connected MCP servers with their available tools.
 
 ```json
 {
-  "servers": [
+  "configured": [
     {
       "name": "filesystem",
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem"],
-      "connected": true,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem"]
+      },
+      "timeout_secs": 30,
+      "env": []
+    }
+  ],
+  "connected": [
+    {
+      "name": "filesystem",
+      "tools_count": 2,
       "tools": [
         {
           "name": "mcp_filesystem_read_file",
@@ -1283,10 +1871,72 @@ List configured and connected MCP servers with their available tools.
           "name": "mcp_filesystem_write_file",
           "description": "Write content to a file"
         }
-      ]
+      ],
+      "connected": true
     }
   ],
-  "total": 1
+  "total_configured": 1,
+  "total_connected": 1
+}
+```
+
+### POST /api/mcp/servers
+
+Create a manual MCP server configuration, persist it to `config.toml`, and rebuild the live MCP connection set.
+
+**Request**:
+
+```json
+{
+  "name": "github",
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"]
+  },
+  "timeout_secs": 30,
+  "env": ["GITHUB_PERSONAL_ACCESS_TOKEN"]
+}
+```
+
+**Response** `201 Created`:
+
+```json
+{
+  "status": "added",
+  "name": "github",
+  "reload": "applied",
+  "connected_servers": 1
+}
+```
+
+### PUT /api/mcp/servers/{name}
+
+Update an existing manual MCP server configuration by name.
+
+**Response** `200 OK`:
+
+```json
+{
+  "status": "updated",
+  "name": "github",
+  "reload": "applied",
+  "connected_servers": 1
+}
+```
+
+### DELETE /api/mcp/servers/{name}
+
+Delete an existing manual MCP server configuration by name.
+
+**Response** `200 OK`:
+
+```json
+{
+  "status": "removed",
+  "name": "github",
+  "reload": "applied",
+  "connected_servers": 0
 }
 ```
 
@@ -1369,6 +2019,28 @@ List agents available via A2A protocol.
       "skills": ["code-review", "debugging", "refactoring"]
     }
   ]
+}
+```
+
+### GET /api/a2a/agents/{id}
+
+Get a discovered external A2A agent by index, name, or URL.
+
+**Response** `200 OK`:
+
+```json
+{
+  "name": "demo-agent",
+  "url": "https://example.com",
+  "description": "Demo external agent",
+  "skills": [
+    {
+      "id": "research",
+      "name": "Research",
+      "description": "Research capability"
+    }
+  ],
+  "version": "1.0.0"
 }
 ```
 
@@ -2136,7 +2808,7 @@ The `Retry-After` header indicates the window duration in seconds.
 
 ## Endpoint Summary
 
-**76 endpoints total** across 15 groups.
+**177 endpoints total** across 15 groups.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -2147,8 +2819,14 @@ The `Retry-After` header indicates the window duration in seconds.
 | GET | `/api/status` | Kernel status |
 | GET | `/api/version` | Version info |
 | POST | `/api/shutdown` | Graceful shutdown |
+| POST | `/api/backup` | Create a backup archive |
+| GET | `/api/backups` | List backup archives |
+| DELETE | `/api/backups/{filename}` | Delete a backup archive |
+| POST | `/api/restore` | Restore persisted state from a backup archive |
 | GET | `/api/profiles` | List agent profiles |
+| GET | `/api/profiles/{name}` | Get agent profile |
 | GET | `/api/tools` | List available tools |
+| GET | `/api/tools/{name}` | Get tool definition |
 | GET | `/api/config` | Configuration (secrets redacted) |
 | GET | `/api/peers` | List OFP wire peers |
 | **Agents** | | |
@@ -2171,6 +2849,12 @@ The `Retry-After` header indicates the window duration in seconds.
 | POST | `/api/workflows` | Create workflow |
 | POST | `/api/workflows/{id}/run` | Run workflow |
 | GET | `/api/workflows/{id}/runs` | List workflow runs |
+| **Routing & Builder** | | |
+| GET | `/api/routing/capabilities` | List routing-visible capabilities |
+| POST | `/api/routing/proposals` | Analyze a goal and draft a capability proposal |
+| POST | `/api/routing/proposals/apply` | Submit a proposal for approval-backed creation |
+| GET | `/api/routing/proposals/jobs` | List builder apply jobs |
+| GET | `/api/routing/proposals/jobs/{id}` | Get a single builder apply job |
 | **Triggers** | | |
 | GET | `/api/triggers` | List triggers |
 | POST | `/api/triggers` | Create trigger |
@@ -2210,10 +2894,14 @@ The `Retry-After` header indicates the window duration in seconds.
 | GET | `/api/clawhub/skill/{slug}` | Skill details |
 | POST | `/api/clawhub/install` | Install from ClawHub |
 | **MCP & A2A** | | |
-| GET | `/api/mcp/servers` | MCP server connections |
+| GET | `/api/mcp/servers` | List configured and connected MCP servers |
+| POST | `/api/mcp/servers` | Create a manual MCP server configuration |
+| PUT | `/api/mcp/servers/{name}` | Update a manual MCP server configuration |
+| DELETE | `/api/mcp/servers/{name}` | Delete a manual MCP server configuration |
 | POST | `/mcp` | MCP HTTP transport (JSON-RPC 2.0) |
 | GET | `/.well-known/agent.json` | A2A agent card |
 | GET | `/a2a/agents` | A2A agent list |
+| GET | `/api/a2a/agents/{id}` | Get discovered A2A agent |
 | POST | `/a2a/tasks/send` | Send A2A task |
 | GET | `/a2a/tasks/{id}` | Get A2A task status |
 | POST | `/a2a/tasks/{id}/cancel` | Cancel A2A task |

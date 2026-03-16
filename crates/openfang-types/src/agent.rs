@@ -432,7 +432,13 @@ pub struct AgentManifest {
     pub description: String,
     /// Author identifier.
     pub author: String,
-    /// Path to the agent module (WASM or Python file).
+    /// Agent execution module.
+    ///
+    /// Examples:
+    /// - `builtin:chat` for the default LLM agent loop
+    /// - `builtin:router` for the native deterministic goal router
+    /// - `python:path/to/script.py`
+    /// - `wasm:path/to/module.wasm`
     pub module: String,
     /// Scheduling mode.
     pub schedule: ScheduleMode,

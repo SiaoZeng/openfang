@@ -46,6 +46,7 @@ class OpenFang {
     this.memory = new MemoryResource(this);
     this.triggers = new TriggerResource(this);
     this.schedules = new ScheduleResource(this);
+    this.comms = new CommsResource(this);
   }
 
   /** Low-level fetch wrapper. */
@@ -137,6 +138,29 @@ class OpenFang {
   /** Config. */
   async config() {
     return this._request("GET", "/api/config");
+  }
+}
+
+// ── Comms Resource ──────────────────────────────────────────────
+
+class CommsResource {
+  constructor(client) { this._c = client; }
+
+  async send(req) {
+    return this._c._request("POST", "/api/comms/send", req);
+  }
+
+  async task(req) {
+    return this._c._request("POST", "/api/comms/task", req);
+  }
+
+  async topology() {
+    return this._c._request("GET", "/api/comms/topology");
+  }
+
+  async events(limit) {
+    var suffix = typeof limit === "number" ? ("?limit=" + encodeURIComponent(limit)) : "";
+    return this._c._request("GET", "/api/comms/events" + suffix);
   }
 }
 
@@ -252,9 +276,10 @@ class AgentResource {
   /** Upload a file to agent. */
   async upload(id, file, filename) {
     var url = this._c.baseUrl + "/api/agents/" + id + "/upload";
-    var form = new FormData();
-    form.append("file", file, filename);
-    var res = await fetch(url, { method: "POST", body: form });
+    var headers = Object.assign({}, this._c._headers);
+    headers["Content-Type"] = (file && file.type) || "application/octet-stream";
+    headers["X-Filename"] = filename || (file && file.name) || "upload";
+    var res = await fetch(url, { method: "POST", headers: headers, body: file });
     if (!res.ok) throw new OpenFangError("Upload failed: " + res.status, res.status);
     return res.json();
   }

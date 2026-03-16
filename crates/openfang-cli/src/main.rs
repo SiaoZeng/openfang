@@ -211,7 +211,10 @@ enum Commands {
     /// Manage execution approvals (list, approve, reject) [*].
     #[command(subcommand)]
     Approvals(ApprovalsCommands),
-    /// Manage scheduled jobs (list, create, delete, enable, disable) [*].
+    /// Capability builder (analyze, submit, inspect jobs) [*].
+    #[command(subcommand)]
+    Builder(BuilderCommands),
+    /// Manage scheduled jobs (list, create, update, delete, enable, disable) [*].
     #[command(subcommand)]
     Cron(CronCommands),
     /// List conversation sessions.
@@ -643,6 +646,43 @@ enum ApprovalsCommands {
 }
 
 #[derive(Subcommand)]
+enum BuilderCommands {
+    /// Analyze a goal and draft a capability proposal if needed.
+    Analyze {
+        /// Durable goal to evaluate.
+        goal: String,
+        /// Output as JSON for scripting.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Analyze a goal and submit the resulting proposal for approval-backed creation.
+    Submit {
+        /// Durable goal to evaluate and submit.
+        goal: String,
+        /// Activate immediately after creation when supported.
+        #[arg(long)]
+        activate: bool,
+        /// Output as JSON for scripting.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List proposal apply jobs.
+    Jobs {
+        /// Output as JSON for scripting.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Get a single proposal job.
+    Job {
+        /// Job ID.
+        id: String,
+        /// Output as JSON for scripting.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum CronCommands {
     /// List scheduled jobs.
     List {
@@ -666,6 +706,29 @@ enum CronCommands {
     Delete {
         /// Job ID.
         id: String,
+    },
+    /// Update a scheduled job.
+    Update {
+        /// Job ID.
+        id: String,
+        /// New job name.
+        #[arg(long)]
+        name: Option<String>,
+        /// New owning agent name or ID.
+        #[arg(long)]
+        agent: Option<String>,
+        /// New cron expression (e.g. "0 */6 * * *").
+        #[arg(long)]
+        spec: Option<String>,
+        /// Replace the action with an agent_turn prompt.
+        #[arg(long)]
+        prompt: Option<String>,
+        /// Enable the job.
+        #[arg(long, conflicts_with = "disable")]
+        enable: bool,
+        /// Disable the job.
+        #[arg(long, conflicts_with = "enable")]
+        disable: bool,
     },
     /// Enable a disabled job.
     Enable {
@@ -1026,6 +1089,16 @@ fn main() {
             ApprovalsCommands::Approve { id } => cmd_approvals_respond(&id, true),
             ApprovalsCommands::Reject { id } => cmd_approvals_respond(&id, false),
         },
+        Some(Commands::Builder(sub)) => match sub {
+            BuilderCommands::Analyze { goal, json } => cmd_builder_analyze(&goal, json),
+            BuilderCommands::Submit {
+                goal,
+                activate,
+                json,
+            } => cmd_builder_submit(&goal, activate, json),
+            BuilderCommands::Jobs { json } => cmd_builder_jobs(json),
+            BuilderCommands::Job { id, json } => cmd_builder_job(&id, json),
+        },
         Some(Commands::Cron(sub)) => match sub {
             CronCommands::List { json } => cmd_cron_list(json),
             CronCommands::Create {
@@ -1035,6 +1108,28 @@ fn main() {
                 name,
             } => cmd_cron_create(&agent, &spec, &prompt, name.as_deref()),
             CronCommands::Delete { id } => cmd_cron_delete(&id),
+            CronCommands::Update {
+                id,
+                name,
+                agent,
+                spec,
+                prompt,
+                enable,
+                disable,
+            } => cmd_cron_update(
+                &id,
+                name.as_deref(),
+                agent.as_deref(),
+                spec.as_deref(),
+                prompt.as_deref(),
+                if enable {
+                    Some(true)
+                } else if disable {
+                    Some(false)
+                } else {
+                    None
+                },
+            ),
             CronCommands::Enable { id } => cmd_cron_toggle(&id, true),
             CronCommands::Disable { id } => cmd_cron_toggle(&id, false),
         },
@@ -2773,7 +2868,7 @@ decay_rate = 0.05
         match client.get(format!("{base}/api/mcp/servers")).send() {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    if let Some(arr) = body.as_array() {
+                    let (configured, connected) = if let Some(arr) = body.as_array() {
                         let connected = arr
                             .iter()
                             .filter(|s| {
@@ -2782,15 +2877,29 @@ decay_rate = 0.05
                                     .unwrap_or(false)
                             })
                             .count();
-                        if !json {
-                            ui::check_ok(&format!(
-                                "MCP servers: {} configured, {} connected",
-                                arr.len(),
-                                connected
-                            ));
-                        }
-                        checks.push(serde_json::json!({"check": "daemon_mcp", "status": "ok", "configured": arr.len(), "connected": connected}));
+                        (arr.len(), connected)
+                    } else {
+                        let configured = body["configured"]
+                            .as_array()
+                            .map(|arr| arr.len())
+                            .unwrap_or_else(|| {
+                                body["total_configured"].as_u64().unwrap_or(0) as usize
+                            });
+                        let connected = body["connected"]
+                            .as_array()
+                            .map(|arr| arr.len())
+                            .unwrap_or_else(|| {
+                                body["total_connected"].as_u64().unwrap_or(0) as usize
+                            });
+                        (configured, connected)
+                    };
+                    if !json {
+                        ui::check_ok(&format!(
+                            "MCP servers: {} configured, {} connected",
+                            configured, connected
+                        ));
                     }
+                    checks.push(serde_json::json!({"check": "daemon_mcp", "status": "ok", "configured": configured, "connected": connected}));
                 }
             }
             _ => {}
@@ -5557,26 +5666,27 @@ fn cmd_approvals_list(json: bool) {
         );
         return;
     }
-    if let Some(arr) = body.as_array() {
-        if arr.is_empty() {
-            println!("No pending approvals.");
-            return;
-        }
-        println!("{:<38} {:<16} {:<12} REQUEST", "ID", "AGENT", "TYPE");
-        println!("{}", "-".repeat(80));
-        for a in arr {
-            println!(
-                "{:<38} {:<16} {:<12} {}",
-                a["id"].as_str().unwrap_or("?"),
-                a["agent_name"].as_str().unwrap_or("?"),
-                a["approval_type"].as_str().unwrap_or("?"),
-                a["description"].as_str().unwrap_or(""),
-            );
-        }
-    } else {
+    let arr = body
+        .get("approvals")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .or_else(|| body.as_array().cloned())
+        .unwrap_or_default();
+
+    if arr.is_empty() {
+        println!("No pending approvals.");
+        return;
+    }
+
+    println!("{:<38} {:<16} {:<16} REQUEST", "ID", "AGENT", "TOOL");
+    println!("{}", "-".repeat(96));
+    for a in arr {
         println!(
-            "{}",
-            serde_json::to_string_pretty(&body).unwrap_or_default()
+            "{:<38} {:<16} {:<16} {}",
+            a["id"].as_str().unwrap_or("?"),
+            a["agent_name"].as_str().unwrap_or("?"),
+            a["tool_name"].as_str().unwrap_or("?"),
+            a["description"].as_str().unwrap_or(""),
         );
     }
 }
@@ -5600,6 +5710,223 @@ fn cmd_approvals_respond(id: &str, approve: bool) {
     }
 }
 
+fn cmd_builder_analyze(goal: &str, json: bool) {
+    let base = require_daemon("builder analyze");
+    let client = daemon_client();
+    let body = daemon_json(
+        client
+            .post(format!("{base}/api/routing/proposals"))
+            .json(&serde_json::json!({ "message": goal }))
+            .send(),
+    );
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+        return;
+    }
+
+    if body.get("error").is_some() {
+        ui::error(&format!(
+            "Analyze failed: {}",
+            body["error"].as_str().unwrap_or("?")
+        ));
+        return;
+    }
+
+    if body["gap_detected"].as_bool().unwrap_or(false) {
+        println!("Gap detected");
+        println!("Reason: {}", body["reason"].as_str().unwrap_or("?"));
+        if let Some(proposal) = body.get("proposal") {
+            println!("Kind: {}", proposal["kind"].as_str().unwrap_or("?"));
+            println!("Name: {}", proposal["name"].as_str().unwrap_or("?"));
+            println!(
+                "Description: {}",
+                proposal["description"].as_str().unwrap_or("?")
+            );
+            println!(
+                "Approval required: {}",
+                proposal["approval_required"].as_bool().unwrap_or(false)
+            );
+        }
+    } else {
+        println!("No gap detected");
+        println!("Reason: {}", body["reason"].as_str().unwrap_or("?"));
+    }
+}
+
+fn cmd_builder_submit(goal: &str, activate: bool, json: bool) {
+    let base = require_daemon("builder submit");
+    let client = daemon_client();
+    let analysis = daemon_json(
+        client
+            .post(format!("{base}/api/routing/proposals"))
+            .json(&serde_json::json!({ "message": goal }))
+            .send(),
+    );
+
+    if analysis.get("error").is_some() {
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&analysis).unwrap_or_default()
+            );
+        } else {
+            ui::error(&format!(
+                "Analyze failed: {}",
+                analysis["error"].as_str().unwrap_or("?")
+            ));
+        }
+        return;
+    }
+
+    if !analysis["gap_detected"].as_bool().unwrap_or(false) {
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&analysis).unwrap_or_default()
+            );
+        } else {
+            println!("No capability gap detected.");
+            println!("Reason: {}", analysis["reason"].as_str().unwrap_or("?"));
+        }
+        return;
+    }
+
+    let Some(proposal) = analysis.get("proposal").cloned() else {
+        ui::error("Analysis reported a gap but returned no proposal.");
+        return;
+    };
+
+    let body = daemon_json(
+        client
+            .post(format!("{base}/api/routing/proposals/apply"))
+            .json(&serde_json::json!({
+                "proposal": proposal,
+                "activate_after_create": activate,
+            }))
+            .send(),
+    );
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+        return;
+    }
+
+    if body.get("error").is_some() {
+        ui::error(&format!(
+            "Submit failed: {}",
+            body["error"].as_str().unwrap_or("?")
+        ));
+        return;
+    }
+
+    println!("Proposal submitted.");
+    println!("  Job ID: {}", body["job_id"].as_str().unwrap_or("?"));
+    println!(
+        "  Approval ID: {}",
+        body["approval_id"].as_str().unwrap_or("?")
+    );
+    println!(
+        "  Status: {}",
+        body["status"].as_str().unwrap_or("pending_approval")
+    );
+    ui::hint("Approve with: openfang approvals approve <approval-id>");
+}
+
+fn cmd_builder_jobs(json: bool) {
+    let base = require_daemon("builder jobs");
+    let client = daemon_client();
+    let body = daemon_json(
+        client
+            .get(format!("{base}/api/routing/proposals/jobs"))
+            .send(),
+    );
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+        return;
+    }
+
+    if body.get("error").is_some() {
+        ui::error(&format!(
+            "Jobs failed: {}",
+            body["error"].as_str().unwrap_or("?")
+        ));
+        return;
+    }
+
+    let arr = body["jobs"].as_array().cloned().unwrap_or_default();
+    if arr.is_empty() {
+        println!("No builder jobs.");
+        return;
+    }
+
+    println!("{:<36} {:<12} {:<12} PROPOSAL", "JOB ID", "KIND", "STATUS");
+    println!("{}", "-".repeat(88));
+    for job in arr {
+        println!(
+            "{:<36} {:<12} {:<12} {}",
+            job["job_id"].as_str().unwrap_or("?"),
+            job["proposal"]["kind"].as_str().unwrap_or("?"),
+            job["status"].as_str().unwrap_or("?"),
+            job["proposal"]["name"].as_str().unwrap_or("?"),
+        );
+    }
+}
+
+fn cmd_builder_job(id: &str, json: bool) {
+    let base = require_daemon("builder job");
+    let client = daemon_client();
+    let body = daemon_json(
+        client
+            .get(format!("{base}/api/routing/proposals/jobs/{id}"))
+            .send(),
+    );
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
+        return;
+    }
+
+    if body.get("error").is_some() {
+        ui::error(&format!(
+            "Failed: {}",
+            body["error"].as_str().unwrap_or("?")
+        ));
+        return;
+    }
+
+    println!("Job: {}", body["job_id"].as_str().unwrap_or("?"));
+    println!("Status: {}", body["status"].as_str().unwrap_or("?"));
+    println!(
+        "Proposal: {}",
+        body["proposal"]["name"].as_str().unwrap_or("?")
+    );
+    println!("Kind: {}", body["proposal"]["kind"].as_str().unwrap_or("?"));
+    println!(
+        "Approval ID: {}",
+        body["approval_id"].as_str().unwrap_or("?")
+    );
+    if let Some(kind) = body["outcome"]["kind"].as_str() {
+        println!("Outcome: {kind}");
+    }
+    if let Some(error) = body["error"].as_str() {
+        println!("Error: {error}");
+    }
+}
+
 fn cmd_cron_list(json: bool) {
     let base = require_daemon("cron list");
     let client = daemon_client();
@@ -5611,13 +5938,13 @@ fn cmd_cron_list(json: bool) {
         );
         return;
     }
-    if let Some(arr) = body.as_array() {
+    if let Some(arr) = cron_jobs_array(&body) {
         if arr.is_empty() {
             println!("No scheduled jobs.");
             return;
         }
         println!(
-            "{:<38} {:<16} {:<20} {:<8} PROMPT",
+            "{:<38} {:<16} {:<20} {:<8} ACTION",
             "ID", "AGENT", "SCHEDULE", "ENABLED"
         );
         println!("{}", "-".repeat(100));
@@ -5626,18 +5953,13 @@ fn cmd_cron_list(json: bool) {
                 "{:<38} {:<16} {:<20} {:<8} {}",
                 j["id"].as_str().unwrap_or("?"),
                 j["agent_id"].as_str().unwrap_or("?"),
-                j["cron_expr"].as_str().unwrap_or("?"),
+                cron_schedule_summary(j),
                 if j["enabled"].as_bool().unwrap_or(false) {
                     "yes"
                 } else {
                     "no"
                 },
-                j["prompt"]
-                    .as_str()
-                    .unwrap_or("")
-                    .chars()
-                    .take(40)
-                    .collect::<String>(),
+                truncate_display(&cron_action_summary(j), 40),
             );
         }
     } else {
@@ -5651,6 +5973,7 @@ fn cmd_cron_list(json: bool) {
 fn cmd_cron_create(agent: &str, spec: &str, prompt: &str, explicit_name: Option<&str>) {
     let base = require_daemon("cron create");
     let client = daemon_client();
+    let agent_id = resolve_agent_ref(&base, &client, agent);
 
     // Use explicit name if provided, otherwise derive from agent + prompt
     let name = if let Some(n) = explicit_name {
@@ -5680,7 +6003,7 @@ fn cmd_cron_create(agent: &str, spec: &str, prompt: &str, explicit_name: Option<
         client
             .post(format!("{base}/api/cron/jobs"))
             .json(&serde_json::json!({
-                "agent_id": agent,
+                "agent_id": agent_id,
                 "name": name,
                 "schedule": {
                     "kind": "cron",
@@ -5693,12 +6016,78 @@ fn cmd_cron_create(agent: &str, spec: &str, prompt: &str, explicit_name: Option<
             }))
             .send(),
     );
-    if let Some(id) = body["id"].as_str() {
+    if let Some(id) = extract_cron_job_id(&body) {
         ui::success(&format!("Cron job created: {id}"));
     } else {
         ui::error(&format!(
             "Failed: {}",
             body["error"].as_str().unwrap_or("?")
+        ));
+    }
+}
+
+fn cmd_cron_update(
+    id: &str,
+    name: Option<&str>,
+    agent: Option<&str>,
+    spec: Option<&str>,
+    prompt: Option<&str>,
+    enabled: Option<bool>,
+) {
+    let mut patch = serde_json::Map::new();
+    let base = require_daemon("cron update");
+    let client = daemon_client();
+
+    if let Some(name) = name {
+        patch.insert("name".into(), serde_json::Value::String(name.to_string()));
+    }
+    if let Some(agent) = agent {
+        let agent_id = resolve_agent_ref(&base, &client, agent);
+        patch.insert("agent_id".into(), serde_json::Value::String(agent_id));
+    }
+    if let Some(spec) = spec {
+        patch.insert(
+            "schedule".into(),
+            serde_json::json!({
+                "kind": "cron",
+                "expr": spec
+            }),
+        );
+    }
+    if let Some(prompt) = prompt {
+        patch.insert(
+            "action".into(),
+            serde_json::json!({
+                "kind": "agent_turn",
+                "message": prompt
+            }),
+        );
+    }
+    if let Some(enabled) = enabled {
+        patch.insert("enabled".into(), serde_json::Value::Bool(enabled));
+    }
+
+    if patch.is_empty() {
+        ui::error("Nothing to update. Provide at least one --name, --agent, --spec, --prompt, --enable, or --disable flag.");
+        std::process::exit(1);
+    }
+
+    let body = daemon_json(
+        client
+            .put(format!("{base}/api/cron/jobs/{id}"))
+            .json(&serde_json::Value::Object(patch))
+            .send(),
+    );
+
+    if body.get("error").is_some() {
+        ui::error(&format!(
+            "Failed: {}",
+            body["error"].as_str().unwrap_or("?")
+        ));
+    } else {
+        ui::success(&format!(
+            "Cron job updated: {}",
+            body["id"].as_str().unwrap_or(id)
         ));
     }
 }
@@ -5720,10 +6109,11 @@ fn cmd_cron_delete(id: &str) {
 fn cmd_cron_toggle(id: &str, enable: bool) {
     let base = require_daemon("cron");
     let client = daemon_client();
-    let endpoint = if enable { "enable" } else { "disable" };
+    let action = if enable { "enabled" } else { "disabled" };
     let body = daemon_json(
         client
-            .post(format!("{base}/api/cron/jobs/{id}/{endpoint}"))
+            .put(format!("{base}/api/cron/jobs/{id}/enable"))
+            .json(&serde_json::json!({ "enabled": enable }))
             .send(),
     );
     if body.get("error").is_some() {
@@ -5732,7 +6122,88 @@ fn cmd_cron_toggle(id: &str, enable: bool) {
             body["error"].as_str().unwrap_or("?")
         ));
     } else {
-        ui::success(&format!("Cron job {id} {endpoint}d."));
+        ui::success(&format!("Cron job {id} {action}."));
+    }
+}
+
+fn cron_jobs_array(body: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    body.get("jobs")
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| body.as_array())
+}
+
+fn resolve_agent_ref(base: &str, client: &reqwest::blocking::Client, agent_ref: &str) -> String {
+    if agent_ref.parse::<uuid::Uuid>().is_ok() {
+        return agent_ref.to_string();
+    }
+
+    let body = daemon_json(client.get(format!("{base}/api/agents")).send());
+    if let Some(agents) = body.as_array() {
+        if let Some(id) = agents
+            .iter()
+            .find(|agent| agent["name"].as_str() == Some(agent_ref))
+            .and_then(|agent| agent["id"].as_str())
+        {
+            return id.to_string();
+        }
+    }
+
+    ui::error(&format!("Agent not found: {agent_ref}"));
+    std::process::exit(1);
+}
+
+fn cron_schedule_summary(job: &serde_json::Value) -> String {
+    let schedule = &job["schedule"];
+    match schedule["kind"].as_str().unwrap_or("") {
+        "cron" => schedule["expr"].as_str().unwrap_or("?").to_string(),
+        "every" => format!("every {}s", schedule["every_secs"].as_u64().unwrap_or(0)),
+        "at" => format!("at {}", schedule["at"].as_str().unwrap_or("?")),
+        _ => "?".to_string(),
+    }
+}
+
+fn cron_action_summary(job: &serde_json::Value) -> String {
+    let action = &job["action"];
+    match action["kind"].as_str().unwrap_or("") {
+        "agent_turn" => action["message"].as_str().unwrap_or("").to_string(),
+        "system_event" => action["text"].as_str().unwrap_or("").to_string(),
+        "workflow_run" => {
+            let workflow_id = action["workflow_id"].as_str().unwrap_or("?");
+            let input = action["input"].as_str().unwrap_or("");
+            if input.is_empty() {
+                format!("workflow:{workflow_id}")
+            } else {
+                format!("workflow:{workflow_id} {input}")
+            }
+        }
+        _ => "".to_string(),
+    }
+}
+
+fn truncate_display(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
+}
+
+fn extract_cron_job_id(body: &serde_json::Value) -> Option<String> {
+    if let Some(id) = body["id"].as_str().or_else(|| body["job_id"].as_str()) {
+        return Some(id.to_string());
+    }
+
+    match body.get("result") {
+        Some(serde_json::Value::Object(obj)) => obj
+            .get("job_id")
+            .or_else(|| obj.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string),
+        Some(serde_json::Value::String(text)) => serde_json::from_str::<serde_json::Value>(text)
+            .ok()
+            .and_then(|parsed| {
+                parsed["job_id"]
+                    .as_str()
+                    .or_else(|| parsed["id"].as_str())
+                    .map(ToString::to_string)
+            }),
+        _ => None,
     }
 }
 
@@ -6685,6 +7156,7 @@ fn remove_self_binary(exe_path: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     // --- Doctor command unit tests ---
 
@@ -6846,5 +7318,49 @@ args = ["-y", "@modelcontextprotocol/server-github"]
         // Should NOT match: openfang lines that aren't PATH-related
         assert!(!is_openfang_path_line("# openfang config", dir));
         assert!(!is_openfang_path_line("alias of=openfang", dir));
+    }
+
+    #[test]
+    fn test_extract_cron_job_id_from_result_string() {
+        let body = serde_json::json!({
+            "result": "{\"job_id\":\"123e4567-e89b-12d3-a456-426614174000\",\"status\":\"created\"}"
+        });
+
+        assert_eq!(
+            extract_cron_job_id(&body).as_deref(),
+            Some("123e4567-e89b-12d3-a456-426614174000")
+        );
+    }
+
+    #[test]
+    fn test_cron_jobs_array_reads_wrapped_response() {
+        let body = serde_json::json!({
+            "jobs": [
+                { "id": "job-1" }
+            ],
+            "total": 1
+        });
+
+        let jobs = cron_jobs_array(&body).unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0]["id"], "job-1");
+    }
+
+    #[test]
+    fn test_cron_schedule_and_action_summary() {
+        let job = serde_json::json!({
+            "schedule": {
+                "kind": "every",
+                "every_secs": 900
+            },
+            "action": {
+                "kind": "workflow_run",
+                "workflow_id": "daily-report",
+                "input": "finance"
+            }
+        });
+
+        assert_eq!(cron_schedule_summary(&job), "every 900s");
+        assert_eq!(cron_action_summary(&job), "workflow:daily-report finance");
     }
 }

@@ -5,6 +5,32 @@ All notable changes to OpenFang will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Native Phase 9 capability builder flow:
+  - deterministic capability-gap analysis on top of the routing registry
+  - reviewable `agent`, `workflow`, and `hand` proposal drafts
+  - approval-backed proposal apply jobs with status tracking
+- Routing builder API:
+  - `GET /api/routing/capabilities`
+  - `POST /api/routing/proposals`
+  - `POST /api/routing/proposals/apply`
+  - `GET /api/routing/proposals/jobs`
+  - `GET /api/routing/proposals/jobs/{id}`
+- Dashboard Builder page for analyzing goals, submitting proposals, and tracking jobs
+- CLI builder commands:
+  - `openfang builder analyze`
+  - `openfang builder submit`
+  - `openfang builder jobs`
+  - `openfang builder job`
+- TUI Builder tab with goal analysis, proposal preview, and approval actions
+
+### Changed
+
+- `openfang approvals list` now renders the current approvals API object response correctly in human-readable mode
+
 ## [0.1.0] - 2026-02-24
 
 ### Added

@@ -87,11 +87,31 @@ pub enum CommsEventKind {
 }
 
 /// Request body for POST /api/comms/send.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommsAttachmentRef {
+    pub file_id: String,
+    #[serde(default)]
+    pub filename: String,
+    #[serde(default)]
+    pub content_type: String,
+}
+
+/// Request body for POST /api/comms/send.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommsSendRequest {
     pub from_agent_id: String,
-    pub to_agent_id: String,
+    #[serde(default)]
+    pub to_agent_id: Option<String>,
+    #[serde(default)]
+    pub channel: Option<String>,
+    #[serde(default)]
+    pub recipient: Option<String>,
+    #[serde(default)]
     pub message: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<CommsAttachmentRef>,
 }
 
 /// Request body for POST /api/comms/task.
@@ -151,6 +171,27 @@ mod tests {
         let req: CommsSendRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.from_agent_id, "a");
         assert_eq!(req.message, "hello");
+        assert_eq!(req.to_agent_id.as_deref(), Some("b"));
+        assert!(req.thread_id.is_none());
+        assert!(req.attachments.is_empty());
+    }
+
+    #[test]
+    fn comms_send_request_rich_deser() {
+        let json = r#"{
+            "from_agent_id":"a",
+            "channel":"telegram",
+            "recipient":"chat-1",
+            "message":"",
+            "thread_id":"42",
+            "attachments":[{"file_id":"f1","filename":"image.png","content_type":"image/png"}]
+        }"#;
+        let req: CommsSendRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.channel.as_deref(), Some("telegram"));
+        assert_eq!(req.recipient.as_deref(), Some("chat-1"));
+        assert_eq!(req.thread_id.as_deref(), Some("42"));
+        assert_eq!(req.attachments.len(), 1);
+        assert_eq!(req.attachments[0].file_id, "f1");
     }
 
     #[test]

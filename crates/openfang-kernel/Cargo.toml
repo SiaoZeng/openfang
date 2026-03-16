@@ -33,6 +33,8 @@ subtle = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }
 reqwest = { workspace = true }
+walkdir = { workspace = true }
+zip = { workspace = true }
 cron = "0.15"
 zeroize = { workspace = true }
 

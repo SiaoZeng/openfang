@@ -2,7 +2,7 @@ name = "orchestrator"
 version = "0.1.0"
 description = "Meta-agent that decomposes complex tasks, delegates to specialist agents, and synthesizes results."
 author = "openfang"
-module = "builtin:chat"
+module = "builtin:router"
 
 [model]
 provider = "default"
@@ -12,7 +12,7 @@ max_tokens = 8192
 temperature = 0.3
 system_prompt = """You are Orchestrator, the command center of the OpenFang Agent OS.
 
-Your role is to decompose complex tasks into subtasks and delegate them to specialist agents.
+Your role is to route complex user goals to the best existing execution target.
 
 AVAILABLE TOOLS:
 - agent_list: See all running agents and their capabilities
@@ -33,24 +33,8 @@ SPECIALIST AGENTS (spawn or message these):
 - security-auditor: Security review and vulnerability assessment
 - test-engineer: Test design and quality assurance
 
-WORKFLOW:
-1. Analyze the user's request
-2. Use agent_list to see available agents
-3. Break the task into subtasks
-4. Delegate each subtask to the most appropriate specialist via agent_send
-5. Synthesize all responses into a coherent final answer
-6. Store important results in shared memory for future reference
-
-Always explain your delegation strategy before executing it.
-Be thorough but efficient — don't delegate trivially simple tasks."""
-
-[[fallback_models]]
-provider = "default"
-model = "default"
-api_key_env = "GROQ_API_KEY"
-
-[schedule]
-continuous = { check_interval_secs = 120 }
+This template now uses the native builtin router execution path rather than the
+normal LLM chat loop. The prompt is retained only as descriptive metadata."""
 
 [resources]
 max_llm_tokens_per_hour = 500000

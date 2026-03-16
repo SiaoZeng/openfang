@@ -151,6 +151,29 @@ Confirm:
 
 ---
 
+## 6.5 Verify Backup and Restore Flow
+
+**Status:** VERIFY before release.
+
+Exercise the operational recovery path on a disposable OpenFang home directory:
+
+```bash
+curl -s -X POST http://127.0.0.1:4200/api/backup | jq
+curl -s http://127.0.0.1:4200/api/backups | jq
+curl -s -X POST http://127.0.0.1:4200/api/restore \
+  -H 'Content-Type: application/json' \
+  -d '{"filename":"openfang_backup_YYYYMMDD_HHMMSS.zip"}' | jq
+```
+
+Confirm:
+- Backup creation returns a `.zip` filename under `~/.openfang/backups/`
+- Backup listing shows the expected archive metadata
+- Restore completes without unexpected errors
+- Restarting the daemon after restore brings config, data, workflows, and workspaces back as expected
+- If `data_dir`, `workspaces_dir`, or `workflows_dir` are configured outside `home_dir`, the omission is visible in `omitted_components`
+
+---
+
 ## 7. Verify Install Scripts Locally
 
 **Status:** VERIFY before release.

@@ -82,6 +82,24 @@ cargo test -p openfang-runtime
 cargo test -p openfang-memory
 ```
 
+### Run SDK Test Harnesses
+
+The REST SDKs now have dedicated lightweight harnesses outside the Rust workspace:
+
+```bash
+# JavaScript SDK (Node built-in test runner)
+npm --prefix sdk/javascript test
+
+# Python SDK (stdlib unittest)
+python -m unittest discover -s sdk/python/tests
+```
+
+Use these when changing:
+- SDK request/response shapes
+- auth header handling
+- upload behavior
+- comms client helpers
+
 ### Check for Clippy Warnings
 
 ```bash
@@ -104,6 +122,72 @@ After building, verify your local setup:
 
 ```bash
 cargo run -- doctor
+```
+
+### Run the Local Webhook Smoke Test
+
+For channel-delivery changes, run the daemon-backed local webhook smoke test:
+
+```bash
+./scripts/webhook-smoke.sh
+```
+
+What it does:
+- builds the current CLI binary
+- starts an isolated daemon in a temporary `OPENFANG_HOME`
+- configures the generic `webhook` channel adapter
+- starts a local callback receiver
+- sends a real `comms_send` channel delivery through the running daemon
+- verifies the signed outbound webhook callback
+
+When to run it:
+- changes to `comms_send`
+- changes to channel-delivery routing
+- changes to attachment handling for channel delivery
+- changes to webhook adapter behavior
+- changes to generic channel adapter plumbing
+
+Useful options:
+
+```bash
+# Keep temp files/logs on failure for debugging
+KEEP_WEBHOOK_SMOKE_TMP=1 ./scripts/webhook-smoke.sh
+
+# Skip rebuild if you already built the current tree
+SKIP_WEBHOOK_SMOKE_BUILD=1 ./scripts/webhook-smoke.sh
+```
+
+### Run the Telegram Smoke Test
+
+For a real external adapter smoke test, use the Telegram script:
+
+```bash
+export TELEGRAM_BOT_TOKEN=...
+export TELEGRAM_CHAT_ID=...
+# optional for forum topics / threaded delivery
+export TELEGRAM_THREAD_ID=...
+
+./scripts/telegram-smoke.sh
+```
+
+What it does:
+- starts an isolated daemon
+- configures the Telegram adapter against the provided bot token and chat
+- optionally uploads a small text attachment
+- sends a real `comms_send` delivery to Telegram
+- verifies API acceptance locally
+
+Important:
+- this is a manual or nightly smoke test, not a standard PR-blocking test
+- delivery must still be verified in the target Telegram chat/topic
+- use a dedicated test bot and test chat/topic
+
+Useful options:
+
+```bash
+KEEP_TELEGRAM_SMOKE_TMP=1 ./scripts/telegram-smoke.sh
+SKIP_TELEGRAM_SMOKE_BUILD=1 ./scripts/telegram-smoke.sh
+SEND_ATTACHMENT=0 ./scripts/telegram-smoke.sh
 ```
 
 ---

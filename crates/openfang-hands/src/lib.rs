@@ -401,15 +401,36 @@ pub struct HandInstance {
 }
 
 impl HandInstance {
+    /// Derive a stable instance ID for a hand.
+    ///
+    /// Only one active instance per hand is currently supported, so deriving
+    /// identity from `hand_id` keeps API/UI controls stable across restarts.
+    pub fn stable_id(hand_id: &str) -> Uuid {
+        Uuid::new_v5(
+            &Uuid::NAMESPACE_URL,
+            format!("openfang-hand-instance:{hand_id}").as_bytes(),
+        )
+    }
+
     /// Create a new pending instance.
     pub fn new(
         hand_id: &str,
         agent_name: &str,
         config: HashMap<String, serde_json::Value>,
     ) -> Self {
+        Self::new_with_id(hand_id, agent_name, config, None)
+    }
+
+    /// Create a new instance with an explicit identity override.
+    pub fn new_with_id(
+        hand_id: &str,
+        agent_name: &str,
+        config: HashMap<String, serde_json::Value>,
+        instance_id: Option<Uuid>,
+    ) -> Self {
         let now = Utc::now();
         Self {
-            instance_id: Uuid::new_v4(),
+            instance_id: instance_id.unwrap_or_else(|| Self::stable_id(hand_id)),
             hand_id: hand_id.to_string(),
             status: HandStatus::Active,
             agent_id: None,
@@ -457,6 +478,17 @@ mod tests {
         assert_eq!(instance.agent_name, "clip-hand");
         assert_eq!(instance.status, HandStatus::Active);
         assert!(instance.agent_id.is_none());
+        assert_eq!(instance.instance_id, HandInstance::stable_id("clip"));
+    }
+
+    #[test]
+    fn hand_instance_identity_is_stable_per_hand() {
+        let first = HandInstance::new("clip", "clip-hand", HashMap::new());
+        let second = HandInstance::new("clip", "clip-hand", HashMap::new());
+        let other = HandInstance::new("lead", "lead-hand", HashMap::new());
+
+        assert_eq!(first.instance_id, second.instance_id);
+        assert_ne!(first.instance_id, other.instance_id);
     }
 
     #[test]

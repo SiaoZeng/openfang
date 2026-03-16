@@ -11,9 +11,25 @@ export interface AgentCreateOpts {
   [key: string]: unknown;
 }
 
+export interface AttachmentRef {
+  file_id: string;
+  filename?: string;
+  content_type?: string;
+}
+
 export interface MessageOpts {
-  attachments?: string[];
+  attachments?: AttachmentRef[];
   [key: string]: unknown;
+}
+
+export interface CommsSendRequest {
+  from_agent_id: string;
+  to_agent_id?: string;
+  channel?: string;
+  recipient?: string;
+  message?: string;
+  thread_id?: string;
+  attachments?: AttachmentRef[];
 }
 
 export interface StreamEvent {
@@ -36,6 +52,7 @@ export class OpenFang {
   memory: MemoryResource;
   triggers: TriggerResource;
   schedules: ScheduleResource;
+  comms: CommsResource;
 
   constructor(baseUrl: string, opts?: { headers?: Record<string, string> });
 
@@ -77,6 +94,13 @@ export class SessionResource {
   list(): Promise<unknown[]>;
   delete(id: string): Promise<unknown>;
   setLabel(id: string, label: string): Promise<unknown>;
+}
+
+export class CommsResource {
+  send(req: CommsSendRequest): Promise<unknown>;
+  task(req: Record<string, unknown>): Promise<unknown>;
+  topology(): Promise<unknown>;
+  events(limit?: number): Promise<unknown[]>;
 }
 
 export class WorkflowResource {

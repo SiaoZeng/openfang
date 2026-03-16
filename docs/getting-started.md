@@ -330,9 +330,10 @@ Now that you have OpenFang running:
 - **Set up channels**: Connect any of 40 messaging platforms (Telegram, Discord, Slack, WhatsApp, LINE, Mastodon, and 34 more). See [Channel Adapters](channel-adapters).
 - **Use bundled skills**: 60 expert knowledge skills are pre-installed (GitHub, Docker, Kubernetes, security audit, prompt engineering, etc.). See [Skill Development](skill-development).
 - **Build custom skills**: Extend agents with Python, WASM, or prompt-only skills. See [Skill Development](skill-development).
-- **Use the API**: 76 REST/WS/SSE endpoints, including an OpenAI-compatible `/v1/chat/completions`. See [API Reference](api-reference).
+- **Use the API**: 177 REST/WS/SSE endpoints, including an OpenAI-compatible `/v1/chat/completions`. See [API Reference](api-reference).
 - **Switch LLM providers**: 20 providers supported (Anthropic, OpenAI, Gemini, Groq, DeepSeek, xAI, Ollama, and more). Per-agent model overrides.
 - **Set up workflows**: Chain multiple agents together. Use `openfang workflow create` with a TOML workflow definition.
+- **Use the capability builder**: Turn unmet goals into approval-backed agent/workflow/hand drafts. Start with `openfang builder analyze "your goal"` and continue via the dashboard, TUI, or CLI.
 - **Use MCP**: Connect to external tools via Model Context Protocol. Configure in `config.toml` under `[[mcp_servers]]`.
 - **Migrate from OpenClaw**: Run `openfang migrate --from openclaw`. See [MIGRATION.md](../MIGRATION.md).
 - **Desktop app**: Run `cargo tauri dev` for a native desktop experience with system tray.
@@ -354,6 +355,13 @@ openfang agent kill <id>               # Kill an agent
 openfang workflow list                 # List workflows
 openfang workflow create <file.json>   # Create a workflow
 openfang workflow run <id> <input>     # Run a workflow
+
+openfang builder analyze "<goal>"      # Analyze a capability gap
+openfang builder submit "<goal>"       # Submit a proposal for approval
+openfang builder jobs                  # List builder jobs
+openfang builder job <id>              # Inspect one builder job
+openfang approvals list                # List pending approvals
+openfang approvals approve <id>        # Approve a queued action
 
 openfang trigger list                  # List event triggers
 openfang trigger create <args>         # Create a trigger

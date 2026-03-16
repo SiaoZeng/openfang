@@ -303,6 +303,14 @@ function app() {
 
     get agents() { return Alpine.store('app').agents; },
 
+    dispatchPageLeave(nextPage) {
+      if (this.page && this.page !== nextPage) {
+        window.dispatchEvent(new CustomEvent('page-leave', {
+          detail: { from: this.page, to: nextPage }
+        }));
+      }
+    },
+
     init() {
       var self = this;
 
@@ -314,12 +322,15 @@ function app() {
       });
 
       // Hash routing
-      var validPages = ['overview','agents','sessions','approvals','comms','workflows','scheduler','channels','skills','hands','analytics','logs','runtime','settings','wizard'];
+      var validPages = ['overview','agents','sessions','approvals','builder','comms','workflows','scheduler','channels','skills','hands','analytics','logs','runtime','settings','wizard'];
       var pageRedirects = {
         'chat': 'agents',
         'templates': 'agents',
         'triggers': 'workflows',
         'cron': 'scheduler',
+        'routing': 'builder',
+        'router': 'builder',
+        'proposals': 'builder',
         'schedules': 'scheduler',
         'memory': 'sessions',
         'audit': 'logs',
@@ -334,8 +345,12 @@ function app() {
         if (pageRedirects[hash]) {
           hash = pageRedirects[hash];
           window.location.hash = hash;
+          return;
         }
-        if (validPages.indexOf(hash) >= 0) self.page = hash;
+        if (validPages.indexOf(hash) >= 0) {
+          self.dispatchPageLeave(hash);
+          self.page = hash;
+        }
       }
       window.addEventListener('hashchange', handleHash);
       handleHash();
@@ -376,6 +391,7 @@ function app() {
     },
 
     navigate(p) {
+      this.dispatchPageLeave(p);
       this.page = p;
       window.location.hash = p;
       this.mobileMenuOpen = false;

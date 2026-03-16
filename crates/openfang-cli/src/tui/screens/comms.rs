@@ -57,7 +57,11 @@ pub struct CommsState {
     // Send modal
     pub show_send_modal: bool,
     pub send_from: String,
-    pub send_to: String,
+    pub send_mode: String,
+    pub send_target: String,
+    pub send_recipient: String,
+    pub send_thread_id: String,
+    pub send_attachment_path: String,
     pub send_msg: String,
     pub send_field: usize,
     // Task modal
@@ -74,9 +78,7 @@ pub enum CommsAction {
     Continue,
     Refresh,
     SendMessage {
-        from: String,
-        to: String,
-        msg: String,
+        payload: serde_json::Value,
     },
     PostTask {
         title: String,
@@ -98,7 +100,11 @@ impl CommsState {
             poll_tick: 0,
             show_send_modal: false,
             send_from: String::new(),
-            send_to: String::new(),
+            send_mode: "agent".to_string(),
+            send_target: String::new(),
+            send_recipient: String::new(),
+            send_thread_id: String::new(),
+            send_attachment_path: String::new(),
             send_msg: String::new(),
             send_field: 0,
             show_task_modal: false,
@@ -143,7 +149,11 @@ impl CommsState {
             KeyCode::Char('s') => {
                 self.show_send_modal = true;
                 self.send_from.clear();
-                self.send_to.clear();
+                self.send_mode = "agent".to_string();
+                self.send_target.clear();
+                self.send_recipient.clear();
+                self.send_thread_id.clear();
+                self.send_attachment_path.clear();
                 self.send_msg.clear();
                 self.send_field = 0;
             }
@@ -180,39 +190,87 @@ impl CommsState {
                 self.show_send_modal = false;
             }
             KeyCode::Tab => {
-                self.send_field = (self.send_field + 1) % 3;
+                self.send_field = (self.send_field + 1) % 7;
             }
             KeyCode::BackTab => {
                 self.send_field = if self.send_field == 0 {
-                    2
+                    6
                 } else {
                     self.send_field - 1
                 };
             }
             KeyCode::Enter => {
-                if !self.send_from.is_empty()
-                    && !self.send_to.is_empty()
-                    && !self.send_msg.is_empty()
-                {
+                let has_target = !self.send_target.trim().is_empty();
+                let has_body = !self.send_msg.trim().is_empty()
+                    || !self.send_attachment_path.trim().is_empty();
+                if !self.send_from.is_empty() && has_target && has_body {
+                    let mut payload = serde_json::json!({
+                        "from_agent_id": self.send_from,
+                        "message": self.send_msg,
+                    });
+                    if !self.send_thread_id.trim().is_empty() {
+                        payload["thread_id"] =
+                            serde_json::Value::String(self.send_thread_id.clone());
+                    }
+                    if !self.send_attachment_path.trim().is_empty() {
+                        payload["attachment_path"] =
+                            serde_json::Value::String(self.send_attachment_path.clone());
+                    }
+                    if self.send_mode == "agent" {
+                        payload["to_agent_id"] =
+                            serde_json::Value::String(self.send_target.clone());
+                    } else {
+                        payload["channel"] = serde_json::Value::String(self.send_target.clone());
+                        if !self.send_recipient.trim().is_empty() {
+                            payload["recipient"] =
+                                serde_json::Value::String(self.send_recipient.clone());
+                        }
+                    }
                     self.show_send_modal = false;
-                    return CommsAction::SendMessage {
-                        from: self.send_from.clone(),
-                        to: self.send_to.clone(),
-                        msg: self.send_msg.clone(),
+                    return CommsAction::SendMessage { payload };
+                }
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') => {
+                if self.send_field == 1 {
+                    self.send_mode = if self.send_mode == "agent" {
+                        "channel".to_string()
+                    } else {
+                        "agent".to_string()
                     };
+                } else if let KeyCode::Char(c) = key.code {
+                    match self.send_field {
+                        0 => self.send_from.push(c),
+                        2 => self.send_target.push(c),
+                        3 => self.send_recipient.push(c),
+                        4 => self.send_thread_id.push(c),
+                        5 => self.send_attachment_path.push(c),
+                        _ => self.send_msg.push(c),
+                    }
                 }
             }
             KeyCode::Char(c) => match self.send_field {
                 0 => self.send_from.push(c),
-                1 => self.send_to.push(c),
+                2 => self.send_target.push(c),
+                3 => self.send_recipient.push(c),
+                4 => self.send_thread_id.push(c),
+                5 => self.send_attachment_path.push(c),
                 _ => self.send_msg.push(c),
             },
             KeyCode::Backspace => match self.send_field {
                 0 => {
                     self.send_from.pop();
                 }
-                1 => {
-                    self.send_to.pop();
+                2 => {
+                    self.send_target.pop();
+                }
+                3 => {
+                    self.send_recipient.pop();
+                }
+                4 => {
+                    self.send_thread_id.pop();
+                }
+                5 => {
+                    self.send_attachment_path.pop();
                 }
                 _ => {
                     self.send_msg.pop();
@@ -545,7 +603,7 @@ fn draw_event_list(f: &mut Frame, area: Rect, state: &mut CommsState) {
 }
 
 fn draw_send_modal(f: &mut Frame, area: Rect, state: &CommsState) {
-    let modal = centered_rect(50, 12, area);
+    let modal = centered_rect(70, 20, area);
     f.render_widget(Clear, modal);
 
     let block = Block::default()
@@ -557,6 +615,14 @@ fn draw_send_modal(f: &mut Frame, area: Rect, state: &CommsState) {
     f.render_widget(block, modal);
 
     let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
@@ -589,33 +655,91 @@ fn draw_send_modal(f: &mut Frame, area: Rect, state: &CommsState) {
         rows[1],
     );
     f.render_widget(
-        Paragraph::new(Span::styled("To (agent ID):", field_style(1))),
+        Paragraph::new(Span::styled("Mode (space toggles):", field_style(1))),
         rows[2],
     );
     f.render_widget(
         Paragraph::new(Span::styled(
-            format!("  {}\u{2588}", &state.send_to),
+            format!("  {}\u{2588}", &state.send_mode),
             Style::default().fg(theme::TEXT),
         )),
         rows[3],
     );
     f.render_widget(
-        Paragraph::new(Span::styled("Message:", field_style(2))),
+        Paragraph::new(Span::styled(
+            if state.send_mode == "agent" {
+                "To (agent ID):"
+            } else {
+                "Channel:"
+            },
+            field_style(2),
+        )),
         rows[4],
     );
     f.render_widget(
         Paragraph::new(Span::styled(
-            format!("  {}\u{2588}", &state.send_msg),
+            format!("  {}\u{2588}", &state.send_target),
             Style::default().fg(theme::TEXT),
         )),
         rows[5],
     );
     f.render_widget(
         Paragraph::new(Span::styled(
-            "[Tab] field  [Enter] send  [Esc] cancel",
-            theme::hint_style(),
+            if state.send_mode == "agent" {
+                "Recipient (unused in agent mode):"
+            } else {
+                "Recipient:"
+            },
+            field_style(3),
         )),
         rows[6],
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            format!("  {}\u{2588}", &state.send_recipient),
+            Style::default().fg(theme::TEXT),
+        )),
+        rows[7],
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled("Thread ID:", field_style(4))),
+        rows[8],
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            format!("  {}\u{2588}", &state.send_thread_id),
+            Style::default().fg(theme::TEXT),
+        )),
+        rows[9],
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled("Attachment Path:", field_style(5))),
+        rows[10],
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            format!("  {}\u{2588}", &state.send_attachment_path),
+            Style::default().fg(theme::TEXT),
+        )),
+        rows[11],
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled("Message:", field_style(6))),
+        rows[12],
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            format!("  {}\u{2588}", &state.send_msg),
+            Style::default().fg(theme::TEXT),
+        )),
+        rows[13],
+    );
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            "[Tab] field  [Space] toggle mode  [Enter] send  [Esc] cancel",
+            theme::hint_style(),
+        )),
+        rows[14],
     );
 }
 
@@ -695,6 +819,41 @@ fn draw_task_modal(f: &mut Frame, area: Rect, state: &CommsState) {
         )),
         rows[6],
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn send_modal_space_in_message_field_appends_to_message() {
+        let mut state = CommsState::new();
+        state.show_send_modal = true;
+        state.send_field = 6;
+        state.send_msg = "hello".to_string();
+
+        let action =
+            state.handle_send_modal_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        assert!(matches!(action, CommsAction::Continue));
+        assert_eq!(state.send_msg, "hello ");
+        assert!(state.send_attachment_path.is_empty());
+    }
+
+    #[test]
+    fn send_modal_space_on_mode_field_toggles_mode() {
+        let mut state = CommsState::new();
+        state.show_send_modal = true;
+        state.send_field = 1;
+        state.send_mode = "agent".to_string();
+
+        state.handle_send_modal_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert_eq!(state.send_mode, "channel");
+
+        state.handle_send_modal_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert_eq!(state.send_mode, "agent");
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

@@ -12,6 +12,15 @@ use std::collections::HashMap;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+#[derive(Debug, Clone)]
+pub struct PersistedHandState {
+    pub hand_id: String,
+    pub config: HashMap<String, serde_json::Value>,
+    pub instance_id: Option<Uuid>,
+    pub status: HandStatus,
+    pub agent_id: Option<AgentId>,
+}
+
 // ─── Settings availability types ────────────────────────────────────────────
 
 /// Availability status of a single setting option.
@@ -57,11 +66,13 @@ impl HandRegistry {
         let entries: Vec<serde_json::Value> = self
             .instances
             .iter()
-            .filter(|e| e.status == HandStatus::Active)
+            .filter(|e| matches!(e.status, HandStatus::Active | HandStatus::Paused))
             .map(|e| {
                 serde_json::json!({
+                    "instance_id": e.instance_id,
                     "hand_id": e.hand_id,
                     "config": e.config,
+                    "status": e.status,
                     "agent_id": e.agent_id,
                 })
             })
@@ -74,12 +85,8 @@ impl HandRegistry {
     }
 
     /// Load persisted hand state and re-activate hands.
-    /// Returns list of (hand_id, config, old_agent_id) that should be activated.
-    /// The `old_agent_id` is the agent UUID from before the restart, used to
-    /// reassign cron jobs to the newly spawned agent (issue #402).
-    pub fn load_state(
-        path: &std::path::Path,
-    ) -> Vec<(String, HashMap<String, serde_json::Value>, Option<AgentId>)> {
+    /// Returns identity and config metadata that should be restored.
+    pub fn load_state(path: &std::path::Path) -> Vec<PersistedHandState> {
         let data = match std::fs::read_to_string(path) {
             Ok(d) => d,
             Err(_) => return Vec::new(),
@@ -97,10 +104,23 @@ impl HandRegistry {
                 let hand_id = e["hand_id"].as_str()?.to_string();
                 let config: HashMap<String, serde_json::Value> =
                     serde_json::from_value(e["config"].clone()).unwrap_or_default();
-                let old_agent_id: Option<AgentId> = e
+                let instance_id: Option<Uuid> = e
+                    .get("instance_id")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok());
+                let status: HandStatus = e
+                    .get("status")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or(HandStatus::Active);
+                let agent_id: Option<AgentId> = e
                     .get("agent_id")
                     .and_then(|v| serde_json::from_value(v.clone()).ok());
-                Some((hand_id, config, old_agent_id))
+                Some(PersistedHandState {
+                    hand_id,
+                    config,
+                    instance_id,
+                    status,
+                    agent_id,
+                })
             })
             .collect()
     }
@@ -205,6 +225,27 @@ impl HandRegistry {
         hand_id: &str,
         config: HashMap<String, serde_json::Value>,
     ) -> HandResult<HandInstance> {
+        self.activate_with_state(hand_id, config, None, None)
+    }
+
+    /// Activate a hand with an explicit instance ID override.
+    pub fn activate_with_id(
+        &self,
+        hand_id: &str,
+        config: HashMap<String, serde_json::Value>,
+        instance_id: Option<Uuid>,
+    ) -> HandResult<HandInstance> {
+        self.activate_with_state(hand_id, config, instance_id, None)
+    }
+
+    /// Activate a hand with explicit persisted identity/state overrides.
+    pub fn activate_with_state(
+        &self,
+        hand_id: &str,
+        config: HashMap<String, serde_json::Value>,
+        instance_id: Option<Uuid>,
+        status: Option<HandStatus>,
+    ) -> HandResult<HandInstance> {
         let def = self
             .definitions
             .get(hand_id)
@@ -217,7 +258,10 @@ impl HandRegistry {
             }
         }
 
-        let instance = HandInstance::new(hand_id, &def.agent.name, config);
+        let mut instance = HandInstance::new_with_id(hand_id, &def.agent.name, config, instance_id);
+        if let Some(status) = status {
+            instance.status = status;
+        }
         let id = instance.instance_id;
         self.instances.insert(id, instance.clone());
         info!(hand = %hand_id, instance = %id, "Hand activated");
@@ -867,6 +911,64 @@ mod tests {
         assert!(!r.degraded);
 
         reg.deactivate(instance.instance_id).unwrap();
+    }
+
+    #[test]
+    fn persist_and_load_state_round_trip_preserves_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state_path = tmp.path().join("hand_state.json");
+        let reg = HandRegistry::new();
+        reg.load_bundled();
+
+        let instance = reg.activate("lead", HashMap::new()).unwrap();
+        let agent_id = AgentId::from_string("lead");
+        reg.set_agent(instance.instance_id, agent_id).unwrap();
+        reg.persist_state(&state_path).unwrap();
+
+        let loaded = HandRegistry::load_state(&state_path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].hand_id, "lead");
+        assert_eq!(loaded[0].instance_id, Some(instance.instance_id));
+        assert_eq!(loaded[0].status, HandStatus::Active);
+        assert_eq!(loaded[0].agent_id, Some(agent_id));
+    }
+
+    #[test]
+    fn load_state_accepts_legacy_entries_without_instance_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state_path = tmp.path().join("hand_state.json");
+        std::fs::write(
+            &state_path,
+            r#"[{"hand_id":"lead","config":{},"agent_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}]"#,
+        )
+        .unwrap();
+
+        let loaded = HandRegistry::load_state(&state_path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].hand_id, "lead");
+        assert_eq!(loaded[0].instance_id, None);
+        assert_eq!(loaded[0].status, HandStatus::Active);
+        assert_eq!(
+            loaded[0].agent_id.map(|id| id.to_string()),
+            Some("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string())
+        );
+    }
+
+    #[test]
+    fn persist_and_load_state_round_trip_preserves_paused_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state_path = tmp.path().join("hand_state.json");
+        let reg = HandRegistry::new();
+        reg.load_bundled();
+
+        let instance = reg.activate("lead", HashMap::new()).unwrap();
+        reg.pause(instance.instance_id).unwrap();
+        reg.persist_state(&state_path).unwrap();
+
+        let loaded = HandRegistry::load_state(&state_path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].hand_id, "lead");
+        assert_eq!(loaded[0].status, HandStatus::Paused);
     }
 
     #[test]

@@ -8,11 +8,17 @@ function commsPage() {
     loading: true,
     loadError: '',
     sseSource: null,
+    streamConnected: false,
     showSendModal: false,
     showTaskModal: false,
+    sendMode: 'agent',
     sendFrom: '',
     sendTo: '',
+    sendChannel: '',
+    sendRecipient: '',
+    sendThreadId: '',
     sendMsg: '',
+    sendAttachments: [],
     sendLoading: false,
     taskTitle: '',
     taskDesc: '',
@@ -31,6 +37,7 @@ function commsPage() {
         this.events = results[1] || [];
         this.startSSE();
       } catch(e) {
+        this.stopSSE();
         this.loadError = e.message || 'Could not load comms data.';
       }
       this.loading = false;
@@ -39,9 +46,14 @@ function commsPage() {
     startSSE() {
       if (this.sseSource) this.sseSource.close();
       var self = this;
-      var url = OpenFangAPI.baseUrl + '/api/comms/events/stream';
-      if (OpenFangAPI.apiKey) url += '?token=' + encodeURIComponent(OpenFangAPI.apiKey);
+      var url = window.location.origin + '/api/comms/events/stream';
+      var token = OpenFangAPI.getToken();
+      if (token) url += '?token=' + encodeURIComponent(token);
       this.sseSource = new EventSource(url);
+      this.streamConnected = false;
+      this.sseSource.onopen = function() {
+        self.streamConnected = true;
+      };
       this.sseSource.onmessage = function(ev) {
         if (ev.data === 'ping') return;
         try {
@@ -54,6 +66,10 @@ function commsPage() {
           }
         } catch(e) { /* ignore parse errors */ }
       };
+      this.sseSource.onerror = function() {
+        self.streamConnected = false;
+        self.stopSSE();
+      };
     },
 
     stopSSE() {
@@ -61,6 +77,7 @@ function commsPage() {
         this.sseSource.close();
         this.sseSource = null;
       }
+      this.streamConnected = false;
     },
 
     async refreshTopology() {
@@ -153,21 +170,74 @@ function commsPage() {
     },
 
     openSendModal() {
+      this.sendMode = 'agent';
       this.sendFrom = '';
       this.sendTo = '';
+      this.sendChannel = '';
+      this.sendRecipient = '';
+      this.sendThreadId = '';
       this.sendMsg = '';
+      this.sendAttachments = [];
       this.showSendModal = true;
     },
 
+    canSubmitSend() {
+      if (!this.sendFrom) return false;
+      if (!this.sendMsg.trim() && !this.sendAttachments.length) return false;
+      if (this.sendMode === 'agent') return !!this.sendTo;
+      return !!this.sendChannel;
+    },
+
+    handleSendFiles(event) {
+      var files = Array.from((event && event.target && event.target.files) || []);
+      for (var i = 0; i < files.length; i++) {
+        this.sendAttachments.push({ file: files[i], uploading: false });
+      }
+      if (event && event.target) event.target.value = '';
+    },
+
+    removeSendAttachment(idx) {
+      this.sendAttachments.splice(idx, 1);
+    },
+
     async submitSend() {
-      if (!this.sendFrom || !this.sendTo || !this.sendMsg.trim()) return;
+      if (!this.canSubmitSend()) return;
       this.sendLoading = true;
       try {
-        await OpenFangAPI.post('/api/comms/send', {
+        var uploadedFiles = [];
+        for (var i = 0; i < this.sendAttachments.length; i++) {
+          var att = this.sendAttachments[i];
+          att.uploading = true;
+          try {
+            var uploadRes = await OpenFangAPI.upload(this.sendFrom, att.file);
+            uploadedFiles.push({
+              file_id: uploadRes.file_id,
+              filename: uploadRes.filename,
+              content_type: uploadRes.content_type
+            });
+          } catch(e) {
+            OpenFangToast.error('Failed to upload ' + att.file.name);
+            this.sendLoading = false;
+            att.uploading = false;
+            return;
+          }
+          att.uploading = false;
+        }
+
+        var body = {
           from_agent_id: this.sendFrom,
-          to_agent_id: this.sendTo,
-          message: this.sendMsg
-        });
+          message: this.sendMsg,
+          attachments: uploadedFiles
+        };
+        if (this.sendThreadId) body.thread_id = this.sendThreadId;
+        if (this.sendMode === 'agent') {
+          body.to_agent_id = this.sendTo;
+        } else {
+          body.channel = this.sendChannel;
+          if (this.sendRecipient) body.recipient = this.sendRecipient;
+        }
+
+        await OpenFangAPI.post('/api/comms/send', body);
         OpenFangToast.success('Message sent');
         this.showSendModal = false;
       } catch(e) {

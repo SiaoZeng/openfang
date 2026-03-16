@@ -9,6 +9,7 @@ function handsPage() {
     loading: true,
     activeLoading: false,
     loadError: '',
+    activeLoadError: '',
     activatingId: null,
     activateResult: null,
     detailHand: null,
@@ -53,6 +54,7 @@ function handsPage() {
 
     async loadActive() {
       this.activeLoading = true;
+      this.activeLoadError = '';
       try {
         var data = await OpenFangAPI.get('/api/hands/active');
         this.instances = (data.instances || []).map(function(i) {
@@ -61,6 +63,7 @@ function handsPage() {
         });
       } catch(e) {
         this.instances = [];
+        this.activeLoadError = e.message || 'Could not load active hands.';
       }
       this.activeLoading = false;
     },

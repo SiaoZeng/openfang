@@ -408,12 +408,9 @@ function agentsPage() {
       this.spawnForm.systemPrompt = 'You are a helpful assistant.';
       this.spawnForm.profile = 'full';
       try {
-        var res = await fetch('/api/status');
-        if (res.ok) {
-          var status = await res.json();
-          if (status.default_provider) this.spawnForm.provider = status.default_provider;
-          if (status.default_model) this.spawnForm.model = status.default_model;
-        }
+        var status = await OpenFangAPI.get('/api/status');
+        if (status.default_provider) this.spawnForm.provider = status.default_provider;
+        if (status.default_model) this.spawnForm.model = status.default_model;
       } catch(e) { /* keep hardcoded defaults */ }
     },
 

@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use super::screens::{
     audit::AuditEntry,
+    builder::{BuilderAnalysis, BuilderJobInfo},
     channels::ChannelInfo,
     dashboard::AuditRow,
     extensions::{ExtensionHealthInfo, ExtensionInfo},
@@ -85,6 +86,18 @@ pub enum AppEvent {
     WorkflowRunResult(String),
     /// Workflow created successfully.
     WorkflowCreated(String),
+    /// Builder jobs loaded.
+    BuilderJobsLoaded(Vec<BuilderJobInfo>),
+    /// Builder analysis loaded.
+    BuilderAnalysisLoaded(BuilderAnalysis),
+    /// Single builder job loaded.
+    BuilderJobLoaded(BuilderJobInfo),
+    /// Builder-specific error.
+    BuilderError(String),
+    /// Proposal submitted for approval.
+    BuilderProposalSubmitted { job_id: String, approval_id: String },
+    /// Builder action message.
+    BuilderActionMessage(String),
     /// Trigger list loaded.
     TriggerListLoaded(Vec<TriggerInfo>),
     /// Trigger created.
@@ -196,6 +209,8 @@ pub enum AppEvent {
     },
     /// Comms events loaded.
     CommsEventsLoaded(Vec<super::screens::comms::CommsEventItem>),
+    /// Comms load failed.
+    CommsLoadFailed(String),
     /// Comms send result.
     CommsSendResult(String),
     /// Comms task post result.
@@ -548,13 +563,13 @@ pub fn spawn_fetch_dashboard(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             // Try to fetch audit trail
             if let Ok(resp) = client.get(format!("{base_url}/api/audit/recent")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let rows: Vec<AuditRow> = body
+                    let rows: Vec<AuditRow> = body["entries"]
                         .as_array()
                         .map(|arr| {
                             arr.iter()
                                 .map(|r| AuditRow {
                                     timestamp: r["timestamp"].as_str().unwrap_or("").to_string(),
-                                    agent: r["agent"].as_str().unwrap_or("").to_string(),
+                                    agent: r["agent_id"].as_str().unwrap_or("").to_string(),
                                     action: r["action"].as_str().unwrap_or("").to_string(),
                                     detail: r["detail"].as_str().unwrap_or("").to_string(),
                                 })
@@ -591,18 +606,20 @@ pub fn spawn_fetch_channels(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
 
             if let Ok(resp) = client.get(format!("{base_url}/api/channels")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let channels: Vec<ChannelInfo> = body
+                    let channels: Vec<ChannelInfo> = body["channels"]
                         .as_array()
                         .map(|arr| {
                             arr.iter()
                                 .map(|ch| {
                                     use super::screens::channels::ChannelStatus;
-                                    let status_str =
-                                        ch["status"].as_str().unwrap_or("not_configured");
-                                    let status = match status_str {
-                                        "ready" => ChannelStatus::Ready,
-                                        "missing_env" => ChannelStatus::MissingEnv,
-                                        _ => ChannelStatus::NotConfigured,
+                                    let configured = ch["configured"].as_bool().unwrap_or(false);
+                                    let has_token = ch["has_token"].as_bool().unwrap_or(false);
+                                    let status = if configured && has_token {
+                                        ChannelStatus::Ready
+                                    } else if configured {
+                                        ChannelStatus::MissingEnv
+                                    } else {
+                                        ChannelStatus::NotConfigured
                                     };
                                     ChannelInfo {
                                         name: ch["name"].as_str().unwrap_or("?").to_string(),
@@ -616,7 +633,7 @@ pub fn spawn_fetch_channels(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                                             .to_string(),
                                         status,
                                         env_vars: Vec::new(),
-                                        enabled: ch["enabled"].as_bool().unwrap_or(false),
+                                        enabled: configured,
                                     }
                                 })
                                 .collect()
@@ -700,7 +717,7 @@ pub fn spawn_fetch_workflows(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                                     id: wf["id"].as_str().unwrap_or("?").to_string(),
                                     name: wf["name"].as_str().unwrap_or("?").to_string(),
                                     steps: wf["steps"].as_u64().unwrap_or(0) as usize,
-                                    created: wf["created"].as_str().unwrap_or("").to_string(),
+                                    created: wf["created_at"].as_str().unwrap_or("").to_string(),
                                 })
                                 .collect()
                         })
@@ -741,8 +758,14 @@ pub fn spawn_fetch_workflow_runs(
                                 .map(|r| WorkflowRun {
                                     id: r["id"].as_str().unwrap_or("?").to_string(),
                                     state: r["state"].as_str().unwrap_or("?").to_string(),
-                                    duration: r["duration"].as_str().unwrap_or("").to_string(),
-                                    output_preview: r["output"].as_str().unwrap_or("").to_string(),
+                                    duration: workflow_run_duration(
+                                        r["started_at"].as_str().unwrap_or(""),
+                                        r["completed_at"].as_str(),
+                                    ),
+                                    output_preview: format!(
+                                        "{} steps completed",
+                                        r["steps_completed"].as_u64().unwrap_or(0)
+                                    ),
                                 })
                                 .collect()
                         })
@@ -839,6 +862,449 @@ pub fn spawn_create_workflow(
     });
 }
 
+fn builder_job_from_json(job: &serde_json::Value) -> BuilderJobInfo {
+    let outcome_summary = match job["outcome"]["kind"].as_str() {
+        Some("workflow") => format!(
+            "Workflow \"{}\" created",
+            job["outcome"]["name"].as_str().unwrap_or("?")
+        ),
+        Some("agent") => format!(
+            "Agent \"{}\" created",
+            job["outcome"]["name"].as_str().unwrap_or("?")
+        ),
+        Some("hand") => {
+            let hand_id = job["outcome"]["hand_id"].as_str().unwrap_or("?");
+            if job["outcome"]["activated"].as_bool().unwrap_or(false) {
+                format!("Hand \"{hand_id}\" created and activated")
+            } else {
+                format!("Hand \"{hand_id}\" created")
+            }
+        }
+        Some(kind) => format!("{kind} created"),
+        None => String::new(),
+    };
+    BuilderJobInfo {
+        job_id: job["job_id"].as_str().unwrap_or("?").to_string(),
+        approval_id: job["approval_id"].as_str().unwrap_or("?").to_string(),
+        proposal_name: job["proposal"]["name"].as_str().unwrap_or("?").to_string(),
+        proposal_kind: job["proposal"]["kind"].as_str().unwrap_or("?").to_string(),
+        proposal_description: job["proposal"]["description"]
+            .as_str()
+            .unwrap_or("")
+            .to_string(),
+        status: job["status"].as_str().unwrap_or("?").to_string(),
+        outcome_summary,
+        error: job["error"].as_str().unwrap_or("").to_string(),
+    }
+}
+
+fn builder_analysis_from_json(body: &serde_json::Value) -> BuilderAnalysis {
+    let proposal = body.get("proposal").cloned();
+    let suggested_tools = proposal
+        .as_ref()
+        .and_then(|value| value.get("suggested_tools"))
+        .and_then(|value| value.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let artifact = if let Some(ref proposal) = proposal {
+        proposal["agent_manifest_toml"]
+            .as_str()
+            .or_else(|| proposal["hand_toml"].as_str())
+            .unwrap_or("")
+            .to_string()
+    } else {
+        String::new()
+    };
+
+    let workflow_steps = proposal
+        .as_ref()
+        .and_then(|value| value.get("workflow"))
+        .and_then(|value| value.get("steps"))
+        .and_then(|value| value.as_array())
+        .map(|steps| {
+            steps
+                .iter()
+                .map(|step| {
+                    format!(
+                        "{} -> {}: {}",
+                        step["name"].as_str().unwrap_or("?"),
+                        step["agent_name_hint"].as_str().unwrap_or("?"),
+                        step["purpose"].as_str().unwrap_or("")
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    BuilderAnalysis {
+        gap_detected: body["gap_detected"].as_bool().unwrap_or(false),
+        reason: body["reason"].as_str().unwrap_or("").to_string(),
+        proposal_name: proposal
+            .as_ref()
+            .and_then(|value| value["name"].as_str())
+            .unwrap_or("")
+            .to_string(),
+        proposal_kind: proposal
+            .as_ref()
+            .and_then(|value| value["kind"].as_str())
+            .unwrap_or("")
+            .to_string(),
+        proposal_description: proposal
+            .as_ref()
+            .and_then(|value| value["description"].as_str())
+            .unwrap_or("")
+            .to_string(),
+        rationale: proposal
+            .as_ref()
+            .and_then(|value| value["rationale"].as_str())
+            .unwrap_or("")
+            .to_string(),
+        suggested_tools,
+        workflow_steps,
+        artifact,
+        proposal_json: proposal,
+    }
+}
+
+pub fn spawn_fetch_builder_jobs(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
+    std::thread::spawn(move || match backend {
+        BackendRef::Daemon(base_url) => {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new());
+            match client
+                .get(format!("{base_url}/api/routing/proposals/jobs"))
+                .send()
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.json::<serde_json::Value>() {
+                        Ok(body) if status.is_success() && body.get("error").is_none() => {
+                            let jobs = body["jobs"]
+                                .as_array()
+                                .map(|arr| arr.iter().map(builder_job_from_json).collect())
+                                .unwrap_or_default();
+                            let _ = tx.send(AppEvent::BuilderJobsLoaded(jobs));
+                        }
+                        Ok(body) => {
+                            let _ = tx.send(AppEvent::BuilderError(format!(
+                                "Builder jobs: {}",
+                                body["error"].as_str().unwrap_or("request failed")
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::BuilderError(format!(
+                                "Builder jobs: failed to parse response: {e}"
+                            )));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::BuilderError(format!("Builder jobs: {e}")));
+                }
+            }
+        }
+        BackendRef::InProcess(kernel) => {
+            let jobs = kernel
+                .list_capability_proposal_jobs()
+                .into_iter()
+                .map(|job| BuilderJobInfo {
+                    job_id: job.job_id.to_string(),
+                    approval_id: job.approval_id.to_string(),
+                    proposal_name: job.proposal.name,
+                    proposal_kind: serde_json::to_value(&job.proposal.kind)
+                        .ok()
+                        .and_then(|value| value.as_str().map(str::to_string))
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    proposal_description: job.proposal.description,
+                    status: serde_json::to_value(&job.status)
+                        .ok()
+                        .and_then(|value| value.as_str().map(str::to_string))
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    outcome_summary: job
+                        .outcome
+                        .map(|outcome| format!("{outcome:?}"))
+                        .unwrap_or_default(),
+                    error: job.error.unwrap_or_default(),
+                })
+                .collect();
+            let _ = tx.send(AppEvent::BuilderJobsLoaded(jobs));
+        }
+    });
+}
+
+pub fn spawn_analyze_builder_goal(backend: BackendRef, goal: String, tx: mpsc::Sender<AppEvent>) {
+    std::thread::spawn(move || match backend {
+        BackendRef::Daemon(base_url) => {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new());
+            match client
+                .post(format!("{base_url}/api/routing/proposals"))
+                .json(&serde_json::json!({ "message": goal }))
+                .send()
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.json::<serde_json::Value>() {
+                        Ok(body) if status.is_success() && body.get("error").is_none() => {
+                            let _ = tx.send(AppEvent::BuilderAnalysisLoaded(
+                                builder_analysis_from_json(&body),
+                            ));
+                        }
+                        Ok(body) => {
+                            let _ = tx.send(AppEvent::BuilderError(format!(
+                                "Builder analyze: {}",
+                                body["error"].as_str().unwrap_or("request failed")
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::BuilderError(format!(
+                                "Builder analyze: failed to parse response: {e}"
+                            )));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::BuilderError(format!("Builder analyze: {e}")));
+                }
+            }
+        }
+        BackendRef::InProcess(kernel) => {
+            let rt = tokio::runtime::Runtime::new().ok();
+            let workflows = rt
+                .as_ref()
+                .map(|rt| rt.block_on(kernel.workflows.list_workflows()))
+                .unwrap_or_default();
+            let router_agent_id = kernel
+                .registry
+                .find_by_name("orchestrator")
+                .map(|entry| entry.id)
+                .unwrap_or_default();
+            let analysis = kernel.analyze_capability_gap(router_agent_id, &workflows, &goal);
+            let body = serde_json::to_value(analysis).unwrap_or_default();
+            let _ = tx.send(AppEvent::BuilderAnalysisLoaded(builder_analysis_from_json(
+                &body,
+            )));
+        }
+    });
+}
+
+pub fn spawn_submit_builder_proposal(
+    backend: BackendRef,
+    proposal: serde_json::Value,
+    activate_after_create: bool,
+    tx: mpsc::Sender<AppEvent>,
+) {
+    std::thread::spawn(move || match backend {
+        BackendRef::Daemon(base_url) => {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new());
+            match client
+                .post(format!("{base_url}/api/routing/proposals/apply"))
+                .json(&serde_json::json!({
+                    "proposal": proposal,
+                    "activate_after_create": activate_after_create,
+                }))
+                .send()
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.json::<serde_json::Value>() {
+                        Ok(body) if status.is_success() && body.get("error").is_none() => {
+                            let _ = tx.send(AppEvent::BuilderProposalSubmitted {
+                                job_id: body["job_id"].as_str().unwrap_or("?").to_string(),
+                                approval_id: body["approval_id"]
+                                    .as_str()
+                                    .unwrap_or("?")
+                                    .to_string(),
+                            });
+                        }
+                        Ok(body) => {
+                            let _ = tx.send(AppEvent::BuilderError(format!(
+                                "Builder submit: {}",
+                                body["error"].as_str().unwrap_or("request failed")
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::BuilderError(format!(
+                                "Builder submit: failed to parse response: {e}"
+                            )));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::BuilderError(format!("Builder submit: {e}")));
+                }
+            }
+        }
+        BackendRef::InProcess(kernel) => {
+            match serde_json::from_value(proposal).ok().and_then(|proposal| {
+                kernel
+                    .submit_capability_proposal(proposal, activate_after_create)
+                    .ok()
+            }) {
+                Some(job) => {
+                    let _ = tx.send(AppEvent::BuilderProposalSubmitted {
+                        job_id: job.job_id.to_string(),
+                        approval_id: job.approval_id.to_string(),
+                    });
+                }
+                None => {
+                    let _ = tx.send(AppEvent::BuilderError(
+                        "Builder submit failed in in-process mode".to_string(),
+                    ));
+                }
+            }
+        }
+    });
+}
+
+pub fn spawn_fetch_builder_job(backend: BackendRef, job_id: String, tx: mpsc::Sender<AppEvent>) {
+    std::thread::spawn(move || match backend {
+        BackendRef::Daemon(base_url) => {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new());
+            match client
+                .get(format!("{base_url}/api/routing/proposals/jobs/{job_id}"))
+                .send()
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.json::<serde_json::Value>() {
+                        Ok(body) if status.is_success() && body.get("error").is_none() => {
+                            let _ =
+                                tx.send(AppEvent::BuilderJobLoaded(builder_job_from_json(&body)));
+                        }
+                        Ok(body) => {
+                            let _ = tx.send(AppEvent::BuilderError(format!(
+                                "Builder job: {}",
+                                body["error"].as_str().unwrap_or("request failed")
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::BuilderError(format!(
+                                "Builder job: failed to parse response: {e}"
+                            )));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::BuilderError(format!("Builder job: {e}")));
+                }
+            }
+        }
+        BackendRef::InProcess(kernel) => {
+            match job_id
+                .parse::<uuid::Uuid>()
+                .ok()
+                .and_then(|id| kernel.get_capability_proposal_job(id))
+            {
+                Some(job) => {
+                    let body = serde_json::to_value(job).unwrap_or_default();
+                    let _ = tx.send(AppEvent::BuilderJobLoaded(builder_job_from_json(&body)));
+                }
+                None => {
+                    let _ = tx.send(AppEvent::BuilderError("Builder job not found".to_string()));
+                }
+            }
+        }
+    });
+}
+
+pub fn spawn_respond_builder_approval(
+    backend: BackendRef,
+    approval_id: String,
+    approve: bool,
+    tx: mpsc::Sender<AppEvent>,
+) {
+    std::thread::spawn(move || match backend {
+        BackendRef::Daemon(base_url) => {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new());
+            let endpoint = if approve { "approve" } else { "reject" };
+            match client
+                .post(format!("{base_url}/api/approvals/{approval_id}/{endpoint}"))
+                .send()
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let body = resp.json::<serde_json::Value>().unwrap_or_default();
+                    if !status.is_success() || body.get("error").is_some() {
+                        let _ = tx.send(AppEvent::BuilderError(format!(
+                            "Builder approval: {}",
+                            body["error"]
+                                .as_str()
+                                .unwrap_or(status.as_str())
+                        )));
+                    } else {
+                        let msg = if approve {
+                            "Proposal approved."
+                        } else {
+                            "Proposal rejected."
+                        };
+                        let _ = tx.send(AppEvent::BuilderActionMessage(msg.to_string()));
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::BuilderError(format!("Builder approval: {e}")));
+                }
+            }
+        }
+        BackendRef::InProcess(kernel) => {
+            match approval_id.parse::<uuid::Uuid>().ok().and_then(|id| {
+                kernel
+                    .approval_manager
+                    .resolve(
+                        id,
+                        if approve {
+                            openfang_types::approval::ApprovalDecision::Approved
+                        } else {
+                            openfang_types::approval::ApprovalDecision::Denied
+                        },
+                        Some("tui".to_string()),
+                    )
+                    .ok()
+            }) {
+                Some(_) => {
+                    let _ = tx.send(AppEvent::BuilderActionMessage(if approve {
+                        "Proposal approved.".to_string()
+                    } else {
+                        "Proposal rejected.".to_string()
+                    }));
+                    // Re-fetch all jobs so the TUI picks up the updated status
+                    let jobs: Vec<_> = kernel
+                        .proposal_jobs
+                        .iter()
+                        .map(|entry| {
+                            let body = serde_json::to_value(entry.value()).unwrap_or_default();
+                            builder_job_from_json(&body)
+                        })
+                        .collect();
+                    let _ = tx.send(AppEvent::BuilderJobsLoaded(jobs));
+                }
+                None => {
+                    let _ = tx.send(AppEvent::BuilderError(
+                        "Builder approval response failed".to_string(),
+                    ));
+                }
+            }
+        }
+    });
+}
+
 /// Fetch triggers in background.
 pub fn spawn_fetch_triggers(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
     std::thread::spawn(move || match backend {
@@ -857,8 +1323,8 @@ pub fn spawn_fetch_triggers(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                                 .map(|tr| TriggerInfo {
                                     id: tr["id"].as_str().unwrap_or("?").to_string(),
                                     agent_id: tr["agent_id"].as_str().unwrap_or("?").to_string(),
-                                    pattern: tr["pattern"].as_str().unwrap_or("?").to_string(),
-                                    fires: tr["fires"].as_u64().unwrap_or(0),
+                                    pattern: trigger_pattern_label(&tr["pattern"]),
+                                    fires: tr["fire_count"].as_u64().unwrap_or(0),
                                     enabled: tr["enabled"].as_bool().unwrap_or(true),
                                 })
                                 .collect()
@@ -1109,10 +1575,19 @@ pub fn spawn_fetch_agent_mcp_servers(
                     .unwrap_or_default();
                 let mut available = Vec::new();
                 if let Ok(mcp_tools) = kernel.mcp_tools.lock() {
+                    let configured_servers: Vec<String> = kernel
+                        .effective_mcp_servers
+                        .read()
+                        .map(|servers| servers.iter().map(|s| s.name.clone()).collect())
+                        .unwrap_or_default();
+                    let configured_refs: Vec<&str> =
+                        configured_servers.iter().map(String::as_str).collect();
                     let mut seen = std::collections::HashSet::new();
                     for tool in mcp_tools.iter() {
-                        if let Some(server) = openfang_runtime::mcp::extract_mcp_server(&tool.name)
-                        {
+                        if let Some(server) = openfang_runtime::mcp::extract_mcp_server_from_known(
+                            &tool.name,
+                            &configured_refs,
+                        ) {
                             if seen.insert(server.to_string()) {
                                 available.push(server.to_string());
                             }
@@ -1228,29 +1703,81 @@ pub fn spawn_fetch_sessions(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
     std::thread::spawn(move || match backend {
         BackendRef::Daemon(base_url) => {
             let client = daemon_client();
-            if let Ok(resp) = client.get(format!("{base_url}/api/sessions")).send() {
-                if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let sessions: Vec<SessionInfo> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|s| SessionInfo {
-                                    id: s["id"].as_str().unwrap_or("").to_string(),
-                                    agent_name: s["agent_name"].as_str().unwrap_or("").to_string(),
-                                    agent_id: s["agent_id"].as_str().unwrap_or("").to_string(),
-                                    message_count: s["message_count"].as_u64().unwrap_or(0),
-                                    created: s["created"].as_str().unwrap_or("").to_string(),
+            match client.get(format!("{base_url}/api/sessions")).send() {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.json::<serde_json::Value>() {
+                        Ok(body) if status.is_success() => {
+                            let sessions: Vec<SessionInfo> = body["sessions"]
+                                .as_array()
+                                .map(|arr| {
+                                    arr.iter()
+                                        .map(|s| SessionInfo {
+                                            id: s["session_id"].as_str().unwrap_or("").to_string(),
+                                            agent_name: s["agent_name"]
+                                                .as_str()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            agent_id: s["agent_id"]
+                                                .as_str()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            message_count: s["message_count"].as_u64().unwrap_or(0),
+                                            created: s["created_at"]
+                                                .as_str()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                        })
+                                        .collect()
                                 })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let _ = tx.send(AppEvent::SessionsLoaded(sessions));
+                                .unwrap_or_default();
+                            let _ = tx.send(AppEvent::SessionsLoaded(sessions));
+                        }
+                        Ok(body) => {
+                            let _ = tx.send(AppEvent::FetchError(format!(
+                                "Sessions: {}",
+                                body["error"].as_str().unwrap_or("request failed")
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::FetchError(format!(
+                                "Sessions: failed to parse response: {e}"
+                            )));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::FetchError(format!("Sessions: {e}")));
                 }
             }
         }
-        BackendRef::InProcess(_) => {
-            let _ = tx.send(AppEvent::SessionsLoaded(Vec::new()));
-        }
+        BackendRef::InProcess(kernel) => match kernel.memory.list_sessions() {
+            Ok(raw_sessions) => {
+                let sessions = raw_sessions
+                    .into_iter()
+                    .map(|s| {
+                        let agent_id = s["agent_id"].as_str().unwrap_or("").to_string();
+                        let agent_name = agent_id
+                            .parse::<uuid::Uuid>()
+                            .ok()
+                            .map(openfang_types::agent::AgentId)
+                            .and_then(|id| kernel.registry.get(id).map(|entry| entry.name.clone()))
+                            .unwrap_or_default();
+                        SessionInfo {
+                            id: s["session_id"].as_str().unwrap_or("").to_string(),
+                            agent_name,
+                            agent_id,
+                            message_count: s["message_count"].as_u64().unwrap_or(0),
+                            created: s["created_at"].as_str().unwrap_or("").to_string(),
+                        }
+                    })
+                    .collect();
+                let _ = tx.send(AppEvent::SessionsLoaded(sessions));
+            }
+            Err(e) => {
+                let _ = tx.send(AppEvent::FetchError(format!("Sessions: {e}")));
+            }
+        },
     });
 }
 
@@ -1323,28 +1850,66 @@ pub fn spawn_fetch_memory_kv(backend: BackendRef, agent_id: String, tx: mpsc::Se
     std::thread::spawn(move || match backend {
         BackendRef::Daemon(base_url) => {
             let client = daemon_client();
-            if let Ok(resp) = client
+            match client
                 .get(format!("{base_url}/api/memory/agents/{agent_id}/kv"))
                 .send()
             {
-                if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let pairs: Vec<KvPair> = if let Some(obj) = body.as_object() {
-                        obj.iter()
-                            .map(|(k, v)| KvPair {
-                                key: k.clone(),
-                                value: v.as_str().unwrap_or(&v.to_string()).to_string(),
-                            })
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
-                    let _ = tx.send(AppEvent::MemoryKvLoaded(pairs));
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.json::<serde_json::Value>() {
+                        Ok(body) if status.is_success() => {
+                            let pairs: Vec<KvPair> = body["kv_pairs"]
+                                .as_array()
+                                .map(|arr| {
+                                    arr.iter()
+                                        .map(|item| KvPair {
+                                            key: item["key"].as_str().unwrap_or("").to_string(),
+                                            value: item["value"]
+                                                .as_str()
+                                                .unwrap_or(&item["value"].to_string())
+                                                .to_string(),
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            let _ = tx.send(AppEvent::MemoryKvLoaded(pairs));
+                        }
+                        Ok(body) => {
+                            let _ = tx.send(AppEvent::FetchError(format!(
+                                "Memory KV: {}",
+                                body["error"].as_str().unwrap_or("request failed")
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::FetchError(format!(
+                                "Memory KV: failed to parse response: {e}"
+                            )));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::FetchError(format!("Memory KV: {e}")));
                 }
             }
         }
-        BackendRef::InProcess(_) => {
-            let _ = tx.send(AppEvent::MemoryKvLoaded(Vec::new()));
-        }
+        BackendRef::InProcess(kernel) => match kernel
+            .memory
+            .list_kv(openfang_kernel::kernel::shared_memory_agent_id())
+        {
+            Ok(pairs) => {
+                let pairs = pairs
+                    .into_iter()
+                    .map(|(key, value)| KvPair {
+                        key,
+                        value: value.as_str().unwrap_or(&value.to_string()).to_string(),
+                    })
+                    .collect();
+                let _ = tx.send(AppEvent::MemoryKvLoaded(pairs));
+            }
+            Err(e) => {
+                let _ = tx.send(AppEvent::FetchError(format!("Memory KV: {e}")));
+            }
+        },
     });
 }
 
@@ -1417,14 +1982,18 @@ pub fn spawn_fetch_skills(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/skills")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let skills: Vec<SkillInfo> = body
+                    let skills: Vec<SkillInfo> = body["skills"]
                         .as_array()
                         .map(|arr| {
                             arr.iter()
                                 .map(|s| SkillInfo {
                                     name: s["name"].as_str().unwrap_or("").to_string(),
                                     runtime: s["runtime"].as_str().unwrap_or("").to_string(),
-                                    source: s["source"].as_str().unwrap_or("").to_string(),
+                                    source: s["source"]["type"]
+                                        .as_str()
+                                        .or_else(|| s["source"].as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
                                     description: s["description"]
                                         .as_str()
                                         .unwrap_or("")
@@ -1513,6 +2082,28 @@ fn parse_clawhub_results(body: &serde_json::Value) -> Vec<ClawHubResult> {
         .unwrap_or_default()
 }
 
+fn trigger_pattern_label(value: &serde_json::Value) -> String {
+    if let Some(label) = value.as_str() {
+        return label.to_string();
+    }
+    if let Some(obj) = value.as_object() {
+        if let Some((key, _)) = obj.iter().next() {
+            return key.replace('_', " ");
+        }
+    }
+    "?".to_string()
+}
+
+fn workflow_run_duration(started_at: &str, completed_at: Option<&str>) -> String {
+    if started_at.is_empty() {
+        return "\u{2014}".to_string();
+    }
+    let Some(_completed_at) = completed_at else {
+        return "running".to_string();
+    };
+    "completed".to_string()
+}
+
 /// Install a skill from ClawHub.
 pub fn spawn_install_skill(backend: BackendRef, slug: String, tx: mpsc::Sender<AppEvent>) {
     std::thread::spawn(move || match backend {
@@ -1572,18 +2163,7 @@ pub fn spawn_fetch_mcp_servers(backend: BackendRef, tx: mpsc::Sender<AppEvent>) 
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/mcp/servers")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let servers: Vec<McpServerInfo> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|s| McpServerInfo {
-                                    name: s["name"].as_str().unwrap_or("").to_string(),
-                                    connected: s["connected"].as_bool().unwrap_or(false),
-                                    tool_count: s["tool_count"].as_u64().unwrap_or(0) as usize,
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let servers = parse_mcp_servers_response(&body);
                     let _ = tx.send(AppEvent::McpServersLoaded(servers));
                 }
             }
@@ -1592,6 +2172,68 @@ pub fn spawn_fetch_mcp_servers(backend: BackendRef, tx: mpsc::Sender<AppEvent>) 
             let _ = tx.send(AppEvent::McpServersLoaded(Vec::new()));
         }
     });
+}
+
+fn parse_mcp_servers_response(body: &serde_json::Value) -> Vec<McpServerInfo> {
+    if let Some(arr) = body.as_array() {
+        return arr
+            .iter()
+            .map(|server| McpServerInfo {
+                name: server["name"].as_str().unwrap_or("").to_string(),
+                connected: server["connected"].as_bool().unwrap_or(false),
+                tool_count: server["tool_count"]
+                    .as_u64()
+                    .or_else(|| server["tools_count"].as_u64())
+                    .unwrap_or(0) as usize,
+            })
+            .collect();
+    }
+
+    let connected = body
+        .get("connected")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let configured = body
+        .get("configured")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut by_name: std::collections::BTreeMap<String, McpServerInfo> =
+        std::collections::BTreeMap::new();
+
+    for server in configured {
+        let name = server["name"].as_str().unwrap_or("").to_string();
+        if name.is_empty() {
+            continue;
+        }
+        by_name.entry(name.clone()).or_insert(McpServerInfo {
+            name,
+            connected: false,
+            tool_count: 0,
+        });
+    }
+
+    for server in connected {
+        let name = server["name"].as_str().unwrap_or("").to_string();
+        if name.is_empty() {
+            continue;
+        }
+        by_name
+            .entry(name.clone())
+            .and_modify(|info| {
+                info.connected = true;
+                info.tool_count = server["tools_count"].as_u64().unwrap_or(0) as usize;
+            })
+            .or_insert(McpServerInfo {
+                name,
+                connected: true,
+                tool_count: server["tools_count"].as_u64().unwrap_or(0) as usize,
+            });
+    }
+
+    by_name.into_values().collect()
 }
 
 /// Fetch provider auth status for templates screen.
@@ -1633,33 +2275,7 @@ pub fn spawn_fetch_security(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/security")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let features: Vec<SecurityFeature> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|f| {
-                                    use super::screens::security::SecuritySection;
-                                    let section = match f["section"].as_str().unwrap_or("core") {
-                                        "configurable" => SecuritySection::Configurable,
-                                        "monitoring" => SecuritySection::Monitoring,
-                                        _ => SecuritySection::Core,
-                                    };
-                                    SecurityFeature {
-                                        name: f["name"].as_str().unwrap_or("").to_string(),
-                                        active: f["active"].as_bool().unwrap_or(true),
-                                        description: f["description"]
-                                            .as_str()
-                                            .unwrap_or("")
-                                            .to_string(),
-                                        section,
-                                    }
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if !features.is_empty() {
-                        let _ = tx.send(AppEvent::SecurityLoaded(features));
-                    }
+                    let _ = tx.send(AppEvent::SecurityLoaded(parse_security_features(&body)));
                 }
             }
         }
@@ -1667,6 +2283,99 @@ pub fn spawn_fetch_security(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             // Use builtin defaults (already loaded in SecurityState::new())
         }
     });
+}
+
+fn parse_security_features(body: &serde_json::Value) -> Vec<SecurityFeature> {
+    let mut features = super::screens::security::builtin_features();
+
+    update_security_feature(
+        &mut features,
+        "Path Traversal Prevention",
+        body["core_protections"]["path_traversal"].as_bool(),
+    );
+    update_security_feature(
+        &mut features,
+        "SSRF Protection",
+        body["core_protections"]["ssrf_protection"].as_bool(),
+    );
+    update_security_feature(
+        &mut features,
+        "Subprocess Isolation",
+        body["core_protections"]["subprocess_isolation"].as_bool(),
+    );
+    update_security_feature(
+        &mut features,
+        "WASM Dual Metering",
+        Some(
+            body["configurable"]["wasm_sandbox"]["fuel_metering"]
+                .as_bool()
+                .unwrap_or(false)
+                && body["configurable"]["wasm_sandbox"]["epoch_interruption"]
+                    .as_bool()
+                    .unwrap_or(false),
+        )
+        .filter(|_| body["configurable"]["wasm_sandbox"].is_object()),
+    );
+    update_security_feature(
+        &mut features,
+        "Capability Inheritance",
+        Some(
+            body["core_protections"]["capability_system"]
+                .as_bool()
+                .unwrap_or(false)
+                && body["core_protections"]["privilege_escalation_prevention"]
+                    .as_bool()
+                    .unwrap_or(false),
+        )
+        .filter(|_| body["core_protections"].is_object()),
+    );
+    update_security_feature(
+        &mut features,
+        "Secret Zeroization",
+        body["secret_zeroization"].as_bool(),
+    );
+    update_security_feature(
+        &mut features,
+        "Ed25519 Manifest Signing",
+        body["monitoring"]["manifest_signing"]["available"]
+            .as_bool()
+            .or_else(|| body["monitoring"]["manifest_signing"]["enabled"].as_bool()),
+    );
+    update_security_feature(
+        &mut features,
+        "Taint Tracking",
+        body["monitoring"]["taint_tracking"]["enabled"].as_bool(),
+    );
+    update_security_feature(
+        &mut features,
+        "OFP Wire Auth",
+        body["core_protections"]["wire_hmac_auth"].as_bool(),
+    );
+    update_security_feature(
+        &mut features,
+        "Rate Limiting",
+        body["configurable"]["rate_limiter"]["enabled"].as_bool(),
+    );
+    update_security_feature(
+        &mut features,
+        "Security Headers",
+        body["core_protections"]["security_headers"].as_bool(),
+    );
+    update_security_feature(
+        &mut features,
+        "Merkle Audit Trail",
+        body["monitoring"]["audit_trail"]["enabled"].as_bool(),
+    );
+
+    features
+}
+
+fn update_security_feature(features: &mut [SecurityFeature], name: &str, active: Option<bool>) {
+    if let Some(active) = active {
+        if let Some(feature) = features.iter_mut().find(|feature| feature.name == name) {
+            feature.active = active;
+        }
+    }
 }
 
 /// Verify audit chain.
@@ -1712,16 +2421,17 @@ pub fn spawn_fetch_audit(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                 .send()
             {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let entries: Vec<AuditEntry> = body
+                    let tip_hash = body["tip_hash"].as_str().unwrap_or("").to_string();
+                    let entries: Vec<AuditEntry> = body["entries"]
                         .as_array()
                         .map(|arr| {
                             arr.iter()
                                 .map(|e| AuditEntry {
                                     timestamp: e["timestamp"].as_str().unwrap_or("").to_string(),
                                     action: e["action"].as_str().unwrap_or("").to_string(),
-                                    agent: e["agent"].as_str().unwrap_or("").to_string(),
+                                    agent: e["agent_id"].as_str().unwrap_or("").to_string(),
                                     detail: e["detail"].as_str().unwrap_or("").to_string(),
-                                    tip_hash: e["tip_hash"].as_str().unwrap_or("").to_string(),
+                                    tip_hash: tip_hash.clone(),
                                 })
                                 .collect()
                         })
@@ -1748,23 +2458,23 @@ pub fn spawn_fetch_usage(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                         total_input_tokens: body["total_input_tokens"].as_u64().unwrap_or(0),
                         total_output_tokens: body["total_output_tokens"].as_u64().unwrap_or(0),
                         total_cost_usd: body["total_cost_usd"].as_f64().unwrap_or(0.0),
-                        total_calls: body["total_calls"].as_u64().unwrap_or(0),
+                        total_calls: body["call_count"].as_u64().unwrap_or(0),
                     }));
                 }
             }
             // By model
             if let Ok(resp) = client.get(format!("{base_url}/api/usage/by-model")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let models: Vec<ModelUsage> = body
+                    let models: Vec<ModelUsage> = body["models"]
                         .as_array()
                         .map(|arr| {
                             arr.iter()
                                 .map(|m| ModelUsage {
-                                    model_id: m["model_id"].as_str().unwrap_or("").to_string(),
-                                    input_tokens: m["input_tokens"].as_u64().unwrap_or(0),
-                                    output_tokens: m["output_tokens"].as_u64().unwrap_or(0),
-                                    cost_usd: m["cost_usd"].as_f64().unwrap_or(0.0),
-                                    calls: m["calls"].as_u64().unwrap_or(0),
+                                    model_id: m["model"].as_str().unwrap_or("").to_string(),
+                                    input_tokens: m["total_input_tokens"].as_u64().unwrap_or(0),
+                                    output_tokens: m["total_output_tokens"].as_u64().unwrap_or(0),
+                                    cost_usd: m["total_cost_usd"].as_f64().unwrap_or(0.0),
+                                    calls: m["call_count"].as_u64().unwrap_or(0),
                                 })
                                 .collect()
                         })
@@ -1775,12 +2485,12 @@ pub fn spawn_fetch_usage(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             // By agent
             if let Ok(resp) = client.get(format!("{base_url}/api/usage")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let agents: Vec<AgentUsage> = body
+                    let agents: Vec<AgentUsage> = body["agents"]
                         .as_array()
                         .map(|arr| {
                             arr.iter()
                                 .map(|a| AgentUsage {
-                                    agent_name: a["agent_name"].as_str().unwrap_or("").to_string(),
+                                    agent_name: a["name"].as_str().unwrap_or("").to_string(),
                                     agent_id: a["agent_id"].as_str().unwrap_or("").to_string(),
                                     total_tokens: a["total_tokens"].as_u64().unwrap_or(0),
                                     cost_usd: a["cost_usd"].as_f64().unwrap_or(0.0),
@@ -1859,7 +2569,7 @@ pub fn spawn_fetch_models(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/models")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let models: Vec<ModelInfo> = body
+                    let models: Vec<ModelInfo> = body["models"]
                         .as_array()
                         .map(|arr| {
                             arr.iter()
@@ -1868,8 +2578,8 @@ pub fn spawn_fetch_models(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                                     provider: m["provider"].as_str().unwrap_or("").to_string(),
                                     tier: m["tier"].as_str().unwrap_or("").to_string(),
                                     context_window: m["context_window"].as_u64().unwrap_or(0),
-                                    cost_input: m["cost_input"].as_f64().unwrap_or(0.0),
-                                    cost_output: m["cost_output"].as_f64().unwrap_or(0.0),
+                                    cost_input: m["input_cost_per_m"].as_f64().unwrap_or(0.0),
+                                    cost_output: m["output_cost_per_m"].as_f64().unwrap_or(0.0),
                                 })
                                 .collect()
                         })
@@ -1891,7 +2601,7 @@ pub fn spawn_fetch_tools(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/tools")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let tools: Vec<ToolInfo> = body
+                    let tools: Vec<ToolInfo> = body["tools"]
                         .as_array()
                         .map(|arr| {
                             arr.iter()
@@ -2035,7 +2745,7 @@ pub fn spawn_fetch_peers(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
             let client = daemon_client();
             if let Ok(resp) = client.get(format!("{base_url}/api/peers")).send() {
                 if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let peers: Vec<PeerInfo> = body
+                    let peers: Vec<PeerInfo> = body["peers"]
                         .as_array()
                         .map(|arr| {
                             arr.iter()
@@ -2044,11 +2754,11 @@ pub fn spawn_fetch_peers(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
                                     node_name: p["node_name"].as_str().unwrap_or("").to_string(),
                                     address: p["address"].as_str().unwrap_or("").to_string(),
                                     state: p["state"].as_str().unwrap_or("").to_string(),
-                                    agent_count: p["agent_count"].as_u64().unwrap_or(0),
-                                    protocol_version: p["protocol_version"]
-                                        .as_str()
-                                        .unwrap_or("")
-                                        .to_string(),
+                                    agent_count: p["agents"]
+                                        .as_array()
+                                        .map(|agents| agents.len() as u64)
+                                        .unwrap_or(0),
+                                    protocol_version: p["protocol_version"].to_string(),
                                 })
                                 .collect()
                         })
@@ -2617,66 +3327,111 @@ pub fn spawn_fetch_comms(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
     std::thread::spawn(move || match backend {
         BackendRef::Daemon(base_url) => {
             let client = daemon_client();
+            let mut errors = Vec::new();
+
             // Fetch topology
-            if let Ok(resp) = client.get(format!("{base_url}/api/comms/topology")).send() {
-                if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let nodes: Vec<CommsNode> = body["nodes"]
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|n| CommsNode {
-                                    id: n["id"].as_str().unwrap_or("").to_string(),
-                                    name: n["name"].as_str().unwrap_or("").to_string(),
-                                    state: n["state"].as_str().unwrap_or("").to_string(),
-                                    model: n["model"].as_str().unwrap_or("").to_string(),
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let edges: Vec<CommsEdge> = body["edges"]
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|e| CommsEdge {
-                                    from: e["from"].as_str().unwrap_or("").to_string(),
-                                    to: e["to"].as_str().unwrap_or("").to_string(),
-                                    kind: e["kind"].as_str().unwrap_or("").to_string(),
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let _ = tx.send(AppEvent::CommsTopologyLoaded { nodes, edges });
+            match client.get(format!("{base_url}/api/comms/topology")).send() {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        match resp.json::<serde_json::Value>() {
+                            Ok(body) => {
+                                let nodes: Vec<CommsNode> = body["nodes"]
+                                    .as_array()
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .map(|n| CommsNode {
+                                                id: n["id"].as_str().unwrap_or("").to_string(),
+                                                name: n["name"].as_str().unwrap_or("").to_string(),
+                                                state: n["state"]
+                                                    .as_str()
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                                model: n["model"]
+                                                    .as_str()
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                let edges: Vec<CommsEdge> = body["edges"]
+                                    .as_array()
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .map(|e| CommsEdge {
+                                                from: e["from"].as_str().unwrap_or("").to_string(),
+                                                to: e["to"].as_str().unwrap_or("").to_string(),
+                                                kind: e["kind"].as_str().unwrap_or("").to_string(),
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                let _ = tx.send(AppEvent::CommsTopologyLoaded { nodes, edges });
+                            }
+                            Err(e) => errors.push(format!("Could not parse comms topology: {e}")),
+                        }
+                    } else {
+                        errors.push(format!(
+                            "Could not load comms topology: HTTP {}",
+                            resp.status()
+                        ));
+                    }
                 }
+                Err(e) => errors.push(format!("Could not load comms topology: {e}")),
             }
+
             // Fetch events
-            if let Ok(resp) = client
+            match client
                 .get(format!("{base_url}/api/comms/events?limit=100"))
                 .send()
             {
-                if let Ok(body) = resp.json::<serde_json::Value>() {
-                    let events: Vec<CommsEventItem> = body
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .map(|e| CommsEventItem {
-                                    id: e["id"].as_str().unwrap_or("").to_string(),
-                                    timestamp: e["timestamp"].as_str().unwrap_or("").to_string(),
-                                    kind: e["kind"].as_str().unwrap_or("").to_string(),
-                                    source_name: e["source_name"]
-                                        .as_str()
-                                        .unwrap_or("")
-                                        .to_string(),
-                                    target_name: e["target_name"]
-                                        .as_str()
-                                        .unwrap_or("")
-                                        .to_string(),
-                                    detail: e["detail"].as_str().unwrap_or("").to_string(),
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let _ = tx.send(AppEvent::CommsEventsLoaded(events));
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        match resp.json::<serde_json::Value>() {
+                            Ok(body) => {
+                                let events: Vec<CommsEventItem> = body
+                                    .as_array()
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .map(|e| CommsEventItem {
+                                                id: e["id"].as_str().unwrap_or("").to_string(),
+                                                timestamp: e["timestamp"]
+                                                    .as_str()
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                                kind: e["kind"].as_str().unwrap_or("").to_string(),
+                                                source_name: e["source_name"]
+                                                    .as_str()
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                                target_name: e["target_name"]
+                                                    .as_str()
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                                detail: e["detail"]
+                                                    .as_str()
+                                                    .unwrap_or("")
+                                                    .to_string(),
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                let _ = tx.send(AppEvent::CommsEventsLoaded(events));
+                            }
+                            Err(e) => errors.push(format!("Could not parse comms events: {e}")),
+                        }
+                    } else {
+                        errors.push(format!(
+                            "Could not load comms events: HTTP {}",
+                            resp.status()
+                        ));
+                    }
                 }
+                Err(e) => errors.push(format!("Could not load comms events: {e}")),
+            }
+
+            if !errors.is_empty() {
+                let _ = tx.send(AppEvent::CommsLoadFailed(errors.join(" | ")));
             }
         }
         BackendRef::InProcess(_) => {
@@ -2692,22 +3447,87 @@ pub fn spawn_fetch_comms(backend: BackendRef, tx: mpsc::Sender<AppEvent>) {
 /// Send a message between agents via comms endpoint.
 pub fn spawn_comms_send(
     backend: BackendRef,
-    from: String,
-    to: String,
-    msg: String,
+    mut payload: serde_json::Value,
     tx: mpsc::Sender<AppEvent>,
 ) {
     std::thread::spawn(move || match backend {
         BackendRef::Daemon(base_url) => {
             let client = daemon_client();
-            let body = serde_json::json!({
-                "from_agent_id": from,
-                "to_agent_id": to,
-                "message": msg,
-            });
+
+            if let Some(attachment_path) = payload["attachment_path"].as_str().map(String::from) {
+                let from_agent_id = payload["from_agent_id"].as_str().unwrap_or("").to_string();
+                let file_path = std::path::PathBuf::from(&attachment_path);
+                let filename = file_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("attachment")
+                    .to_string();
+                let content_type = match file_path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .as_str()
+                {
+                    "png" => "image/png",
+                    "jpg" | "jpeg" => "image/jpeg",
+                    "gif" => "image/gif",
+                    "webp" => "image/webp",
+                    "pdf" => "application/pdf",
+                    "txt" => "text/plain",
+                    "json" => "application/json",
+                    "csv" => "text/csv",
+                    _ => "application/octet-stream",
+                };
+
+                match std::fs::read(&file_path) {
+                    Ok(data) => match client
+                        .post(format!("{base_url}/api/agents/{from_agent_id}/upload"))
+                        .header(reqwest::header::CONTENT_TYPE, content_type)
+                        .header("X-Filename", &filename)
+                        .body(data)
+                        .send()
+                    {
+                        Ok(resp) if resp.status().is_success() => {
+                            if let Ok(upload) = resp.json::<serde_json::Value>() {
+                                payload["attachments"] = serde_json::json!([{
+                                    "file_id": upload["file_id"],
+                                    "filename": upload["filename"],
+                                    "content_type": upload["content_type"],
+                                }]);
+                            }
+                            if let Some(obj) = payload.as_object_mut() {
+                                obj.remove("attachment_path");
+                            }
+                        }
+                        Ok(resp) => {
+                            let err = resp
+                                .json::<serde_json::Value>()
+                                .ok()
+                                .and_then(|v| v["error"].as_str().map(String::from))
+                                .unwrap_or_else(|| "Attachment upload failed".to_string());
+                            let _ = tx.send(AppEvent::CommsSendResult(err));
+                            return;
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::CommsSendResult(format!(
+                                "Attachment upload error: {e}"
+                            )));
+                            return;
+                        }
+                    },
+                    Err(e) => {
+                        let _ = tx.send(AppEvent::CommsSendResult(format!(
+                            "Could not read attachment path: {e}"
+                        )));
+                        return;
+                    }
+                }
+            }
+
             match client
                 .post(format!("{base_url}/api/comms/send"))
-                .json(&body)
+                .json(&payload)
                 .send()
             {
                 Ok(resp) => {
@@ -2733,6 +3553,146 @@ pub fn spawn_comms_send(
             ));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_mcp_servers_response, parse_security_features};
+    use crate::tui::screens::security::builtin_features;
+
+    #[test]
+    fn parse_mcp_servers_response_accepts_wrapped_shape() {
+        let body = serde_json::json!({
+            "configured": [
+                { "name": "chrome-devtools" },
+                { "name": "github" }
+            ],
+            "connected": [
+                { "name": "chrome-devtools", "tools_count": 23, "connected": true }
+            ],
+            "total_configured": 2,
+            "total_connected": 1
+        });
+
+        let servers = parse_mcp_servers_response(&body);
+        assert_eq!(servers.len(), 2);
+        let chrome = servers
+            .iter()
+            .find(|server| server.name == "chrome-devtools")
+            .unwrap();
+        assert!(chrome.connected);
+        assert_eq!(chrome.tool_count, 23);
+        let github = servers
+            .iter()
+            .find(|server| server.name == "github")
+            .unwrap();
+        assert!(!github.connected);
+        assert_eq!(github.tool_count, 0);
+    }
+
+    #[test]
+    fn parse_mcp_servers_response_accepts_legacy_array_shape() {
+        let body = serde_json::json!([
+            { "name": "legacy", "connected": true, "tool_count": 2 }
+        ]);
+
+        let servers = parse_mcp_servers_response(&body);
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "legacy");
+        assert!(servers[0].connected);
+        assert_eq!(servers[0].tool_count, 2);
+    }
+
+    #[test]
+    fn parse_security_features_preserves_builtin_catalog() {
+        let body = serde_json::json!({
+            "core_protections": {
+                "path_traversal": true,
+                "ssrf_protection": false,
+                "capability_system": true,
+                "privilege_escalation_prevention": false,
+                "subprocess_isolation": true,
+                "security_headers": true,
+                "wire_hmac_auth": false,
+                "request_id_tracking": true
+            },
+            "configurable": {
+                "rate_limiter": { "enabled": false },
+                "wasm_sandbox": {
+                    "fuel_metering": true,
+                    "epoch_interruption": false
+                }
+            },
+            "monitoring": {
+                "audit_trail": { "enabled": true },
+                "taint_tracking": { "enabled": false },
+                "manifest_signing": { "available": true }
+            },
+            "secret_zeroization": false
+        });
+
+        let expected = builtin_features();
+        let parsed = parse_security_features(&body);
+
+        assert_eq!(parsed.len(), expected.len());
+        assert_eq!(
+            parsed
+                .iter()
+                .map(|feature| feature.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|feature| feature.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            parsed
+                .iter()
+                .find(|feature| feature.name == "SSRF Protection")
+                .unwrap()
+                .description,
+            expected
+                .iter()
+                .find(|feature| feature.name == "SSRF Protection")
+                .unwrap()
+                .description
+        );
+        assert!(
+            !parsed
+                .iter()
+                .find(|feature| feature.name == "SSRF Protection")
+                .unwrap()
+                .active
+        );
+        assert!(
+            !parsed
+                .iter()
+                .find(|feature| feature.name == "Capability Inheritance")
+                .unwrap()
+                .active
+        );
+        assert!(
+            !parsed
+                .iter()
+                .find(|feature| feature.name == "Rate Limiting")
+                .unwrap()
+                .active
+        );
+        assert!(
+            !parsed
+                .iter()
+                .find(|feature| feature.name == "Secret Zeroization")
+                .unwrap()
+                .active
+        );
+        assert!(
+            parsed
+                .iter()
+                .find(|feature| feature.name == "Heartbeat Monitor")
+                .unwrap()
+                .active
+        );
+    }
 }
 
 /// Post a task via comms endpoint.

@@ -189,6 +189,81 @@ impl CronScheduler {
         }
     }
 
+    /// Update a cron job's configuration in place.
+    ///
+    /// Supported patch fields: `name`, `enabled`, `agent_id`, `schedule`,
+    /// `action`, and `delivery`. Omitted fields are left unchanged.
+    pub fn update_job(
+        &self,
+        id: CronJobId,
+        updates: &serde_json::Value,
+    ) -> OpenFangResult<CronJob> {
+        let current = self
+            .get_meta(id)
+            .ok_or_else(|| OpenFangError::Internal(format!("Cron job {id} not found")))?;
+
+        let mut updated = current.job.clone();
+        let enabled_before = updated.enabled;
+        let enabled_patch = updates.get("enabled").and_then(serde_json::Value::as_bool);
+        let schedule_patch = updates.get("schedule").filter(|value| !value.is_null());
+
+        if let Some(name) = updates.get("name").and_then(serde_json::Value::as_str) {
+            updated.name = name.to_string();
+        }
+
+        if let Some(enabled) = enabled_patch {
+            updated.enabled = enabled;
+        }
+
+        if let Some(agent_id) = updates.get("agent_id").and_then(serde_json::Value::as_str) {
+            let uuid = uuid::Uuid::parse_str(agent_id)
+                .map_err(|e| OpenFangError::InvalidInput(format!("Invalid agent_id: {e}")))?;
+            updated.agent_id = AgentId(uuid);
+        }
+
+        if let Some(schedule_value) = schedule_patch {
+            updated.schedule = serde_json::from_value(schedule_value.clone())
+                .map_err(|e| OpenFangError::InvalidInput(format!("Invalid schedule: {e}")))?;
+        }
+
+        if let Some(action_value) = updates.get("action").filter(|value| !value.is_null()) {
+            updated.action = serde_json::from_value(action_value.clone())
+                .map_err(|e| OpenFangError::InvalidInput(format!("Invalid action: {e}")))?;
+        }
+
+        if let Some(delivery_value) = updates.get("delivery").filter(|value| !value.is_null()) {
+            updated.delivery = serde_json::from_value(delivery_value.clone())
+                .map_err(|e| OpenFangError::InvalidInput(format!("Invalid delivery: {e}")))?;
+        }
+
+        let agent_count = self
+            .jobs
+            .iter()
+            .filter(|entry| entry.value().job.agent_id == updated.agent_id && *entry.key() != id)
+            .count();
+        updated
+            .validate(agent_count)
+            .map_err(OpenFangError::InvalidInput)?;
+
+        let schedule_changed = schedule_patch.is_some();
+        let reenabled = !enabled_before && updated.enabled;
+        if schedule_changed || reenabled || enabled_patch == Some(true) {
+            updated.next_run = Some(compute_next_run(&updated.schedule));
+        }
+
+        match self.jobs.get_mut(&id) {
+            Some(mut entry) => {
+                let meta = entry.value_mut();
+                meta.job = updated.clone();
+                if reenabled || enabled_patch == Some(true) {
+                    meta.consecutive_errors = 0;
+                }
+                Ok(updated)
+            }
+            None => Err(OpenFangError::Internal(format!("Cron job {id} not found"))),
+        }
+    }
+
     // -- Queries ------------------------------------------------------------
 
     /// Get a single job by ID.
@@ -714,6 +789,71 @@ mod tests {
         // Non-existent ID should fail
         let fake_id = CronJobId::new();
         assert!(sched.set_enabled(fake_id, true).is_err());
+    }
+
+    #[test]
+    fn test_update_job() {
+        let (sched, _tmp) = make_scheduler(100);
+        let agent = AgentId::new();
+
+        let job = make_job(agent);
+        let id = sched.add_job(job, false).unwrap();
+        sched.record_failure(id, "transient error");
+
+        let updated = sched
+            .update_job(
+                id,
+                &serde_json::json!({
+                    "name": "updated-job",
+                    "enabled": true,
+                    "schedule": { "kind": "every", "every_secs": 900 },
+                    "action": { "kind": "system_event", "text": "heartbeat" },
+                    "delivery": { "kind": "webhook", "url": "https://example.com/hook" }
+                }),
+            )
+            .unwrap();
+
+        assert_eq!(updated.name, "updated-job");
+        assert!(updated.enabled);
+        assert!(matches!(
+            updated.schedule,
+            CronSchedule::Every { every_secs: 900 }
+        ));
+        assert!(updated.next_run.is_some());
+
+        let meta = sched.get_meta(id).unwrap();
+        assert_eq!(meta.consecutive_errors, 0);
+        assert!(matches!(
+            meta.job.schedule,
+            CronSchedule::Every { every_secs: 900 }
+        ));
+    }
+
+    #[test]
+    fn test_update_job_validation_failure_preserves_existing_job() {
+        let (sched, _tmp) = make_scheduler(100);
+        let agent = AgentId::new();
+
+        let job = make_job(agent);
+        let id = sched.add_job(job, false).unwrap();
+        let original = sched.get_job(id).unwrap();
+
+        let err = sched
+            .update_job(
+                id,
+                &serde_json::json!({
+                    "schedule": { "kind": "every", "every_secs": 30 }
+                }),
+            )
+            .unwrap_err();
+
+        assert!(matches!(err, OpenFangError::InvalidInput(_)));
+        let after = sched.get_job(id).unwrap();
+        assert_eq!(after.name, original.name);
+        assert!(matches!(
+            after.schedule,
+            CronSchedule::Every { every_secs: 3600 }
+        ));
     }
 
     // -- test_persist_and_load ----------------------------------------------

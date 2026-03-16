@@ -37,7 +37,7 @@ impl SecuritySection {
 
 // ── Built-in feature definitions ────────────────────────────────────────────
 
-fn builtin_features() -> Vec<SecurityFeature> {
+pub(crate) fn builtin_features() -> Vec<SecurityFeature> {
     vec![
         // Core (8)
         SecurityFeature {

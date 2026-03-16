@@ -420,6 +420,9 @@ args = ["-y", "@modelcontextprotocol/server-postgres"]
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/mcp/servers` | List configured and connected MCP servers with their tools |
+| `POST` | `/api/mcp/servers` | Add a manual MCP server configuration |
+| `PUT` | `/api/mcp/servers/{name}` | Update a manual MCP server configuration |
+| `DELETE` | `/api/mcp/servers/{name}` | Remove a manual MCP server configuration |
 | `POST` | `/mcp` | Handle MCP JSON-RPC requests over HTTP (full tool execution) |
 
 **GET /api/mcp/servers** response:
@@ -445,6 +448,32 @@ args = ["-y", "@modelcontextprotocol/server-postgres"]
       "connected": true
     }
   ]
+}
+```
+
+**POST /api/mcp/servers** request:
+
+```json
+{
+  "name": "github",
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"]
+  },
+  "timeout_secs": 30,
+  "env": ["GITHUB_PERSONAL_ACCESS_TOKEN"]
+}
+```
+
+**POST /api/mcp/servers** response:
+
+```json
+{
+  "status": "added",
+  "name": "github",
+  "reload": "applied",
+  "connected_servers": 1
 }
 ```
 

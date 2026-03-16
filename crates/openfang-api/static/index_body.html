@@ -132,6 +132,10 @@
               <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M6 3v12M18 9a9 9 0 0 1-9 9"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></svg></span>
               <span class="nav-label">Workflows</span>
             </a>
+            <a class="nav-item" :class="{ active: page === 'builder' }" @click="navigate('builder')" :aria-current="page === 'builder' ? 'page' : false">
+              <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7h-7"/><path d="M3 10V3h7"/><path d="M3 21l7-7"/><path d="M14 21H3v-7"/></svg></span>
+              <span class="nav-label">Builder</span>
+            </a>
             <a class="nav-item" :class="{ active: page === 'scheduler' }" @click="navigate('scheduler')" :aria-current="page === 'scheduler' ? 'page' : false">
               <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span>
               <span class="nav-label">Scheduler</span>
@@ -1258,6 +1262,174 @@
       </div>
     </template>
 
+    <!-- Page: Builder -->
+    <template x-if="page === 'builder'">
+      <div x-data="builderPage" x-init="loadData()">
+        <div class="page-header">
+          <h2>Capability Builder</h2>
+          <div class="flex items-center gap-2">
+            <span class="badge badge-muted" x-show="!loadError" x-text="capabilitiesTotal + ' capabilities'"></span>
+            <span class="badge badge-warn" x-show="!loadError && pendingApprovals.length > 0" x-text="pendingApprovals.length + ' builder approvals'"></span>
+            <button class="btn btn-ghost btn-sm" @click="loadData()">Refresh</button>
+          </div>
+        </div>
+        <div class="page-body">
+          <div x-show="loading" class="loading-state"><div class="spinner"></div><span>Loading...</span></div>
+          <div x-show="!loading && loadError" class="error-state">
+            <span class="error-icon">!</span>
+            <p x-text="loadError"></p>
+            <button class="btn btn-ghost btn-sm" @click="loadData()">Retry</button>
+          </div>
+          <template x-if="!loading && !loadError">
+            <div class="overview-grid" style="grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr); align-items:start">
+              <div class="card">
+                <div class="card-header">Analyze Goal</div>
+                <p class="text-sm text-dim mb-3">Describe a durable goal. If routing cannot find a suitable existing capability, OpenFang drafts an agent, workflow, or hand and routes creation through approval.</p>
+                <textarea x-model="goalInput" rows="6" placeholder="Example: automate contract renewal approval escalation weekly" style="width:100%;resize:vertical"></textarea>
+                <div class="flex gap-2 mt-3">
+                  <button class="btn btn-primary" @click="analyzeGoal()" :disabled="analyzing">
+                    <span x-show="!analyzing">Analyze</span>
+                    <span x-show="analyzing">Analyzing...</span>
+                  </button>
+                  <button class="btn btn-ghost" @click="goalInput = ''; analysis = null">Clear</button>
+                </div>
+
+                <template x-if="analysis">
+                  <div style="margin-top:16px">
+                    <div class="flex items-center gap-2 mb-2">
+                      <span class="badge" :class="analysis.gap_detected ? 'badge-warn' : 'badge-success'" x-text="analysis.gap_detected ? 'gap detected' : 'existing capability fits'"></span>
+                      <span class="text-xs text-dim" x-text="analysis.reason"></span>
+                    </div>
+
+                    <div class="card" style="background:var(--bg-elevated, rgba(255,255,255,0.03)); margin:0 0 12px 0">
+                      <div class="text-xs text-dim" style="margin-bottom:8px">Top matches</div>
+                      <template x-if="(analysis.top_matches || []).length === 0">
+                        <div class="text-sm text-dim">No existing routing matches were found.</div>
+                      </template>
+                      <template x-for="match in analysis.top_matches" :key="match.kind + ':' + match.id">
+                        <div class="flex justify-between items-center" style="padding:6px 0;border-top:1px solid var(--border-muted, rgba(255,255,255,0.06))">
+                          <div>
+                            <div class="text-sm" x-text="match.name"></div>
+                            <div class="text-xs text-dim" x-text="formatLabel(match.kind) + ' · ' + (match.matched_keywords || []).join(', ')"></div>
+                          </div>
+                          <span class="badge badge-muted" x-text="match.score.toFixed(2)"></span>
+                        </div>
+                      </template>
+                    </div>
+
+                    <template x-if="analysis.proposal">
+                      <div class="card" style="margin:0">
+                        <div class="flex justify-between items-start gap-2">
+                          <div>
+                            <div class="card-header" style="margin:0" x-text="analysis.proposal.name"></div>
+                            <div class="text-sm text-dim" x-text="analysis.proposal.description"></div>
+                          </div>
+                          <span class="badge badge-warn" x-text="formatLabel(analysis.proposal.kind)"></span>
+                        </div>
+                        <div class="text-xs text-dim mt-2" x-text="analysis.proposal.rationale"></div>
+                        <div class="mt-3">
+                          <div class="text-xs text-dim">Suggested tools</div>
+                          <div class="flex gap-1" style="flex-wrap:wrap;margin-top:6px">
+                            <template x-for="tool in analysis.proposal.suggested_tools" :key="tool">
+                              <span class="badge badge-muted" x-text="tool"></span>
+                            </template>
+                          </div>
+                        </div>
+                        <template x-if="analysis.proposal.workflow">
+                          <div class="mt-3">
+                            <div class="text-xs text-dim" style="margin-bottom:8px">Workflow draft steps</div>
+                            <template x-for="step in analysis.proposal.workflow.steps" :key="step.name">
+                              <div style="padding:8px 0;border-top:1px solid var(--border-muted, rgba(255,255,255,0.06))">
+                                <div class="text-sm" x-text="step.name"></div>
+                                <div class="text-xs text-dim" x-text="step.purpose"></div>
+                                <div class="text-xs text-dim" x-text="'Agent hint: ' + step.agent_name_hint"></div>
+                              </div>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="proposalArtifact(analysis.proposal)">
+                          <div class="mt-3">
+                            <div class="text-xs text-dim" style="margin-bottom:8px">Generated artifact</div>
+                            <pre class="code-block" x-text="proposalArtifact(analysis.proposal)" style="max-height:320px;overflow:auto"></pre>
+                          </div>
+                        </template>
+                        <div class="flex gap-2 mt-3">
+                          <button class="btn btn-primary" @click="applyProposal(false)" :disabled="applying">
+                            <span x-show="!applying">Submit For Approval</span>
+                            <span x-show="applying">Submitting...</span>
+                          </button>
+                          <button class="btn btn-ghost" @click="applyProposal(true)" :disabled="applying || analysis.proposal.kind === 'workflow'">Create And Activate</button>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+
+              <div style="display:grid;gap:16px">
+                <div class="card">
+                  <div class="flex justify-between items-center">
+                    <div class="card-header" style="margin:0">Current Job</div>
+                    <button class="btn btn-ghost btn-sm" @click="refreshCurrentJob()" x-show="currentJob">Refresh</button>
+                  </div>
+                  <template x-if="!currentJob">
+                    <div class="text-sm text-dim">No proposal job selected yet.</div>
+                  </template>
+                  <template x-if="currentJob">
+                    <div>
+                      <div class="flex items-center gap-2 mb-2">
+                        <span class="badge" :class="statusBadgeClass(currentJob.status)" x-text="formatLabel(currentJob.status)"></span>
+                        <span class="text-xs text-dim" x-text="currentJob.job_id"></span>
+                      </div>
+                      <div class="text-sm" x-text="currentJob.proposal.name"></div>
+                      <div class="text-xs text-dim" x-text="currentJob.proposal.description"></div>
+                      <div class="text-xs text-dim mt-2" x-text="'Approval ID: ' + currentJob.approval_id"></div>
+                      <div class="text-xs text-dim" x-show="currentJob.error" x-text="currentJob.error"></div>
+                      <div class="text-sm mt-2" x-show="currentJob.outcome" x-text="outcomeSummary(currentJob)"></div>
+                      <div class="flex gap-2 mt-3" x-show="currentJob.status === 'pending_approval'">
+                        <button class="btn btn-success btn-sm" @click="approveCurrent()">Approve</button>
+                        <button class="btn btn-danger btn-sm" @click="rejectCurrent()">Reject</button>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="card">
+                  <div class="flex justify-between items-center">
+                    <div class="card-header" style="margin:0">Recent Jobs</div>
+                    <span class="text-xs text-dim" x-text="jobs.length + ' total'"></span>
+                  </div>
+                  <div x-show="jobs.length === 0" class="text-sm text-dim">No builder jobs yet.</div>
+                  <template x-for="job in jobs" :key="job.job_id">
+                    <button class="card" style="width:100%;text-align:left;padding:12px;margin-top:8px;background:var(--bg-elevated, rgba(255,255,255,0.02))" @click="useJob(job)">
+                      <div class="flex justify-between items-center">
+                        <div class="text-sm" x-text="job.proposal.name"></div>
+                        <span class="badge" :class="statusBadgeClass(job.status)" x-text="formatLabel(job.status)"></span>
+                      </div>
+                      <div class="text-xs text-dim" x-text="formatLabel(job.proposal.kind) + ' · ' + (job.updated_at || '')"></div>
+                      <div class="text-xs text-dim" x-show="job.outcome" x-text="outcomeSummary(job)"></div>
+                    </button>
+                  </template>
+                </div>
+
+                <div class="card">
+                  <div class="card-header" style="margin:0">Pending Builder Approvals</div>
+                  <div x-show="pendingApprovals.length === 0" class="text-sm text-dim">No builder approvals waiting.</div>
+                  <template x-for="approval in pendingApprovals" :key="approval.id">
+                    <div style="padding:10px 0;border-top:1px solid var(--border-muted, rgba(255,255,255,0.06))">
+                      <div class="text-sm" x-text="approval.action_summary || approval.action"></div>
+                      <div class="text-xs text-dim" x-text="approval.description"></div>
+                      <div class="text-xs text-dim" x-text="approval.id"></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+
     <!-- Page: Approvals -->
     <template x-if="page === 'approvals'">
       <div x-data="approvalsPage" x-init="loadData()">
@@ -1866,7 +2038,12 @@
           <!-- ── TAB: Run History ── -->
           <div x-show="tab === 'history'">
             <div x-show="historyLoading" class="loading-state"><div class="spinner"></div><span>Loading run history...</span></div>
-            <div x-show="!historyLoading">
+            <div x-show="!historyLoading && historyLoadError" class="error-state">
+              <span class="error-icon">!</span>
+              <p x-text="historyLoadError"></p>
+              <button class="btn btn-ghost btn-sm" @click="loadHistory()">Retry</button>
+            </div>
+            <div x-show="!historyLoading && !historyLoadError">
               <div class="card mb-4" style="border-left:3px solid var(--accent)">
                 <div class="font-bold" style="font-size:13px;margin-bottom:4px">Run History</div>
                 <div class="text-sm text-dim" style="line-height:1.6">
@@ -2574,7 +2751,12 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
             <!-- TAB: Active Instances -->
             <div x-show="tab === 'active'">
               <div x-show="activeLoading" class="loading-state"><div class="spinner"></div><span>Loading active hands...</span></div>
-              <div class="card-grid" x-show="instances.length && !activeLoading">
+              <div x-show="!activeLoading && activeLoadError" class="error-state">
+                <span class="error-icon">!</span>
+                <p x-text="activeLoadError"></p>
+                <button class="btn btn-ghost btn-sm" @click="loadActive()">Retry</button>
+              </div>
+              <div class="card-grid" x-show="instances.length && !activeLoading && !activeLoadError">
                 <template x-for="inst in instances" :key="inst.instance_id">
                   <div class="card">
                     <div class="flex justify-between items-center mb-2">
@@ -2620,7 +2802,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                   </div>
                 </template>
               </div>
-              <div class="empty-state" x-show="!instances.length && !activeLoading">
+              <div class="empty-state" x-show="!instances.length && !activeLoading && !activeLoadError">
                 <h4>No active hands</h4>
                 <p class="hint">Activate a hand from the Available tab to get started. Each hand spawns a dedicated agent.</p>
                 <button class="btn btn-primary mt-4" @click="tab = 'available'">Browse Hands</button>
@@ -3187,6 +3369,12 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
             <button class="btn btn-ghost btn-sm" @click="loadData()">Retry</button>
           </div>
           <div x-show="!loading && !loadError">
+          <div x-show="loadWarnings.length" class="info-card" style="border-left:3px solid var(--warning);margin-bottom:16px">
+            <h4>Partial Data Unavailable</h4>
+            <template x-for="warning in loadWarnings" :key="warning">
+              <div class="text-xs text-dim" x-text="warning"></div>
+            </template>
+          </div>
           <div class="tabs" role="tablist">
             <div class="tab" role="tab" :class="{ active: tab === 'providers' }" @click="tab = 'providers'">Providers</div>
             <div class="tab" role="tab" :class="{ active: tab === 'models' }" @click="tab = 'models'">Models</div>
@@ -4484,7 +4672,12 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                   Live Event Feed
                 </div>
                 <div class="flex items-center gap-2">
-                  <span class="badge badge-success" style="font-size:9px;padding:2px 6px;animation:pulse-ring 2s infinite">LIVE</span>
+                  <span
+                    class="badge"
+                    :class="streamConnected ? 'badge-success' : 'badge-dim'"
+                    style="font-size:9px;padding:2px 6px"
+                    :style="streamConnected ? 'animation:pulse-ring 2s infinite' : ''"
+                    x-text="streamConnected ? 'LIVE' : 'OFFLINE'"></span>
                   <span class="text-xs text-dim" x-text="events.length + ' events'"></span>
                 </div>
               </div>
@@ -4507,9 +4700,16 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
 
           <!-- Send Message Modal -->
           <div x-show="showSendModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px)" @click.self="showSendModal=false" x-transition>
-            <div class="card" style="width:420px;max-width:90vw" @click.stop>
-              <div class="card-header">Send Agent Message</div>
+            <div class="card" style="width:520px;max-width:92vw" @click.stop>
+              <div class="card-header">Send Comms Message</div>
               <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
+                <div>
+                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">Target Mode</label>
+                  <select x-model="sendMode" class="input" style="width:100%">
+                    <option value="agent">Agent</option>
+                    <option value="channel">Channel</option>
+                  </select>
+                </div>
                 <div>
                   <label class="text-xs text-dim" style="display:block;margin-bottom:4px">From Agent</label>
                   <select x-model="sendFrom" class="input" style="width:100%">
@@ -4519,7 +4719,7 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                     </template>
                   </select>
                 </div>
-                <div>
+                <div x-show="sendMode === 'agent'">
                   <label class="text-xs text-dim" style="display:block;margin-bottom:4px">To Agent</label>
                   <select x-model="sendTo" class="input" style="width:100%">
                     <option value="">Select agent...</option>
@@ -4528,13 +4728,39 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
                     </template>
                   </select>
                 </div>
+                <div x-show="sendMode === 'channel'">
+                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">Channel</label>
+                  <input type="text" x-model="sendChannel" class="input" placeholder="telegram / webhook / slack ..." style="width:100%">
+                </div>
+                <div x-show="sendMode === 'channel'">
+                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">Recipient (optional if channel default exists)</label>
+                  <input type="text" x-model="sendRecipient" class="input" placeholder="Platform recipient ID" style="width:100%">
+                </div>
+                <div>
+                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">Thread ID (optional)</label>
+                  <input type="text" x-model="sendThreadId" class="input" placeholder="Thread / topic / reply identifier" style="width:100%">
+                </div>
                 <div>
                   <label class="text-xs text-dim" style="display:block;margin-bottom:4px">Message</label>
                   <textarea x-model="sendMsg" class="input" rows="3" placeholder="Type a message..." style="width:100%;resize:vertical"></textarea>
                 </div>
+                <div>
+                  <label class="text-xs text-dim" style="display:block;margin-bottom:4px">Attachments (optional)</label>
+                  <input type="file" multiple @change="handleSendFiles($event)" class="input" style="width:100%">
+                  <template x-if="sendAttachments.length">
+                    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+                      <template x-for="(att, idx) in sendAttachments" :key="idx">
+                        <div class="flex items-center justify-between gap-2" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px">
+                          <span class="text-xs" x-text="att.file.name + (att.uploading ? ' (uploading...)' : '')"></span>
+                          <button class="btn btn-ghost btn-xs" @click="removeSendAttachment(idx)" type="button">Remove</button>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
                 <div class="flex gap-2" style="justify-content:flex-end">
                   <button class="btn btn-ghost btn-sm" @click="showSendModal=false">Cancel</button>
-                  <button class="btn btn-primary btn-sm" @click="submitSend()" :disabled="sendLoading || !sendFrom || !sendTo || !sendMsg.trim()">
+                  <button class="btn btn-primary btn-sm" @click="submitSend()" :disabled="sendLoading || !canSubmitSend()">
                     <span x-show="sendLoading">Sending...</span>
                     <span x-show="!sendLoading">Send</span>
                   </button>

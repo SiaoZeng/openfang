@@ -63,6 +63,22 @@ jobs:
       # Tests that need a display (Tauri) are skipped in headless CI via cfg
       - run: cargo test --workspace
 
+  sdk-tests:
+    name: SDK Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run JavaScript SDK tests
+        run: npm --prefix sdk/javascript test
+      - name: Run Python SDK tests
+        run: python -m unittest discover -s sdk/python/tests
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

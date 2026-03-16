@@ -1,5 +1,6 @@
 //! Request/response types for the OpenFang API.
 
+use openfang_kernel::capability_builder::CapabilityProposal;
 use serde::{Deserialize, Serialize};
 
 /// Request to spawn an agent from a TOML manifest string or a template name.
@@ -106,4 +107,18 @@ pub struct MigrateScanRequest {
 pub struct ClawHubInstallRequest {
     /// ClawHub skill slug (e.g., "github-helper").
     pub slug: String,
+}
+
+/// Request to generate a routing-time capability proposal for an unmet goal.
+#[derive(Debug, Deserialize)]
+pub struct CapabilityProposalRequest {
+    pub message: String,
+}
+
+/// Request to submit a capability proposal for approval-backed creation.
+#[derive(Debug, Deserialize)]
+pub struct ApplyCapabilityProposalRequest {
+    pub proposal: CapabilityProposal,
+    #[serde(default)]
+    pub activate_after_create: bool,
 }

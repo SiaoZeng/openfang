@@ -3,11 +3,22 @@
 use crate::auth::AuthManager;
 use crate::background::{self, BackgroundExecutor};
 use crate::capabilities::CapabilityManager;
-use crate::config::load_config;
+use crate::capability_builder::{
+    self, CapabilityApplyOutcome, CapabilityGapAnalysis, CapabilityProposal, CapabilityProposalJob,
+    CapabilityProposalJobStatus,
+};
+use crate::config::{default_config_path, load_config};
 use crate::error::{KernelError, KernelResult};
 use crate::event_bus::EventBus;
 use crate::metering::MeteringEngine;
 use crate::registry::AgentRegistry;
+use crate::router::{
+    self, RouterAgent, RouterCatalog, RouterDecision, RouterHand, RouterTarget, RouterWorkflow,
+};
+use crate::routing_capabilities::{
+    normalize_route_text, tokenize_route_text, RoutingCapability, RoutingCapabilityKind,
+    RoutingCapabilityTarget,
+};
 use crate::scheduler::AgentScheduler;
 use crate::supervisor::Supervisor;
 use crate::triggers::{TriggerEngine, TriggerId, TriggerPattern};
@@ -57,9 +68,55 @@ impl LlmDriver for StubDriver {
     }
 }
 
+fn load_installed_hands(
+    hand_registry: &openfang_hands::registry::HandRegistry,
+    hands_dir: &Path,
+) -> usize {
+    let entries = match std::fs::read_dir(hands_dir) {
+        Ok(entries) => entries,
+        Err(_) => return 0,
+    };
+
+    let mut count = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let toml_path = path.join("HAND.toml");
+        if !toml_path.exists() {
+            continue;
+        }
+
+        let toml_content = match std::fs::read_to_string(&toml_path) {
+            Ok(content) => content,
+            Err(error) => {
+                warn!(path = %toml_path.display(), error = %error, "Failed to read installed hand");
+                continue;
+            }
+        };
+        let skill_content = std::fs::read_to_string(path.join("SKILL.md")).unwrap_or_default();
+
+        match hand_registry.upsert_from_content(&toml_content, &skill_content) {
+            Ok(def) => {
+                info!(hand = %def.id, name = %def.name, "Loaded installed hand");
+                count += 1;
+            }
+            Err(error) => {
+                warn!(path = %path.display(), error = %error, "Failed to load installed hand");
+            }
+        }
+    }
+
+    count
+}
+
 pub struct OpenFangKernel {
     /// Kernel configuration.
     pub config: KernelConfig,
+    /// Path of the config file the kernel was booted from.
+    config_source_path: PathBuf,
     /// Agent registry.
     pub registry: AgentRegistry,
     /// Capability manager.
@@ -131,6 +188,8 @@ pub struct OpenFangKernel {
     pub cron_scheduler: crate::cron::CronScheduler,
     /// Execution approval manager.
     pub approval_manager: crate::approval::ApprovalManager,
+    /// Capability proposal apply jobs waiting on approval or execution.
+    pub proposal_jobs: dashmap::DashMap<uuid::Uuid, CapabilityProposalJob>,
     /// Agent bindings for multi-account routing (Mutex for runtime add/remove).
     pub bindings: std::sync::Mutex<Vec<openfang_types::config::AgentBinding>>,
     /// Broadcast configuration.
@@ -289,6 +348,43 @@ fn ensure_workspace(workspace: &Path) -> KernelResult<()> {
         serde_json::to_string_pretty(&meta).unwrap_or_default(),
     );
     Ok(())
+}
+
+fn normalize_agent_name(name: &str) -> String {
+    name.trim().to_lowercase()
+}
+
+fn hand_seed_keywords(hand_id: &str) -> Vec<String> {
+    match hand_id {
+        "browser" => vec![
+            "browser",
+            "website",
+            "web",
+            "navigate",
+            "click",
+            "screenshot",
+            "form",
+        ],
+        "clip" => vec![
+            "video",
+            "youtube",
+            "clip",
+            "subtitle",
+            "captions",
+            "audio",
+            "transcribe",
+        ],
+        "lead" => vec!["lead", "prospect", "sales", "outreach", "prospecting"],
+        "collector" => vec!["collect", "monitor", "tracking", "watchlist", "sources"],
+        "predictor" => vec!["predict", "forecast", "probability", "scenario"],
+        "researcher" => vec!["research", "sources", "investigate", "compare"],
+        "trader" => vec!["trade", "trading", "portfolio", "market", "signals"],
+        "twitter" => vec!["twitter", "tweet", "posting", "engagement", "social"],
+        _ => Vec::new(),
+    }
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 /// Generate workspace identity files for an agent (SOUL.md, USER.md, TOOLS.md, MEMORY.md).
@@ -505,12 +601,23 @@ fn gethostname() -> Option<String> {
 impl OpenFangKernel {
     /// Boot the kernel with configuration from the given path.
     pub fn boot(config_path: Option<&Path>) -> KernelResult<Self> {
-        let config = load_config(config_path);
-        Self::boot_with_config(config)
+        let resolved_config_path = config_path
+            .map(Path::to_path_buf)
+            .unwrap_or_else(default_config_path);
+        let config = load_config(Some(&resolved_config_path));
+        Self::boot_with_config_path(config, resolved_config_path)
     }
 
     /// Boot the kernel with an explicit configuration.
-    pub fn boot_with_config(mut config: KernelConfig) -> KernelResult<Self> {
+    pub fn boot_with_config(config: KernelConfig) -> KernelResult<Self> {
+        let config_path = config.home_dir.join("config.toml");
+        Self::boot_with_config_path(config, config_path)
+    }
+
+    fn boot_with_config_path(
+        mut config: KernelConfig,
+        config_source_path: PathBuf,
+    ) -> KernelResult<Self> {
         use openfang_types::config::KernelMode;
 
         // Env var overrides — useful for Docker where config.toml is baked in.
@@ -789,6 +896,10 @@ impl OpenFangKernel {
         if hand_count > 0 {
             info!("Loaded {hand_count} bundled hand(s)");
         }
+        let installed_hands = load_installed_hands(&hand_registry, &config.home_dir.join("hands"));
+        if installed_hands > 0 {
+            info!("Loaded {installed_hands} installed hand(s)");
+        }
 
         // Initialize extension/integration registry
         let mut extension_registry =
@@ -1001,6 +1112,7 @@ impl OpenFangKernel {
 
         let kernel = Self {
             config,
+            config_source_path,
             registry: AgentRegistry::new(),
             capabilities: CapabilityManager::new(),
             event_bus: EventBus::new(),
@@ -1036,6 +1148,7 @@ impl OpenFangKernel {
             delivery_tracker: DeliveryTracker::new(),
             cron_scheduler,
             approval_manager,
+            proposal_jobs: dashmap::DashMap::new(),
             bindings: std::sync::Mutex::new(initial_bindings),
             broadcast: initial_broadcast,
             auto_reply_engine,
@@ -1050,6 +1163,8 @@ impl OpenFangKernel {
             agent_msg_locks: dashmap::DashMap::new(),
             self_handle: OnceLock::new(),
         };
+
+        kernel.load_persisted_capability_proposal_jobs();
 
         // Restore persisted agents from SQLite
         match kernel.memory.load_all_agents() {
@@ -1238,6 +1353,11 @@ impl OpenFangKernel {
 
         info!("OpenFang kernel booted successfully");
         Ok(kernel)
+    }
+
+    /// Path to the config file backing the running kernel.
+    pub fn config_path(&self) -> &Path {
+        &self.config_source_path
     }
 
     /// Spawn a new agent from a manifest, optionally linking to a parent agent.
@@ -1527,7 +1647,9 @@ impl OpenFangKernel {
         })?;
 
         // Dispatch based on module type
-        let result = if entry.manifest.module.starts_with("wasm:") {
+        let result = if entry.manifest.module == "builtin:router" {
+            Box::pin(self.execute_router_agent(&entry, agent_id, message)).await
+        } else if entry.manifest.module.starts_with("wasm:") {
             self.execute_wasm_agent(&entry, message, kernel_handle)
                 .await
         } else if entry.manifest.module.starts_with("python:") {
@@ -1612,18 +1734,26 @@ impl OpenFangKernel {
             KernelError::OpenFang(OpenFangError::AgentNotFound(agent_id.to_string()))
         })?;
 
+        let is_router = entry.manifest.module == "builtin:router";
         let is_wasm = entry.manifest.module.starts_with("wasm:");
         let is_python = entry.manifest.module.starts_with("python:");
 
         // Non-LLM modules: execute non-streaming and emit results as stream events
-        if is_wasm || is_python {
+        if is_router || is_wasm || is_python {
             let (tx, rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
             let kernel_clone = Arc::clone(self);
             let message_owned = message.to_string();
             let entry_clone = entry.clone();
 
             let handle = tokio::spawn(async move {
-                let result = if is_wasm {
+                let result = if is_router {
+                    Box::pin(kernel_clone.execute_router_agent(
+                        &entry_clone,
+                        agent_id,
+                        &message_owned,
+                    ))
+                    .await
+                } else if is_wasm {
                     kernel_clone
                         .execute_wasm_agent(&entry_clone, &message_owned, kernel_handle)
                         .await
@@ -1996,19 +2126,24 @@ impl OpenFangKernel {
                     // Persist usage to database (same as non-streaming path)
                     let model = &manifest.model.model;
                     let cost = MeteringEngine::estimate_cost_with_catalog(
-                        &kernel_clone.model_catalog.read().unwrap_or_else(|e| e.into_inner()),
+                        &kernel_clone
+                            .model_catalog
+                            .read()
+                            .unwrap_or_else(|e| e.into_inner()),
                         model,
                         result.total_usage.input_tokens,
                         result.total_usage.output_tokens,
                     );
-                    let _ = kernel_clone.metering.record(&openfang_memory::usage::UsageRecord {
-                        agent_id,
-                        model: model.clone(),
-                        input_tokens: result.total_usage.input_tokens,
-                        output_tokens: result.total_usage.output_tokens,
-                        cost_usd: cost,
-                        tool_calls: result.iterations.saturating_sub(1),
-                    });
+                    let _ = kernel_clone
+                        .metering
+                        .record(&openfang_memory::usage::UsageRecord {
+                            agent_id,
+                            model: model.clone(),
+                            input_tokens: result.total_usage.input_tokens,
+                            output_tokens: result.total_usage.output_tokens,
+                            cost_usd: cost,
+                            tool_calls: result.iterations.saturating_sub(1),
+                        });
 
                     let _ = kernel_clone
                         .registry
@@ -2193,6 +2328,118 @@ impl OpenFangKernel {
             silent: false,
             directives: Default::default(),
         })
+    }
+
+    /// Execute the native deterministic router for `builtin:router` agents.
+    async fn execute_router_agent(
+        &self,
+        entry: &AgentEntry,
+        agent_id: AgentId,
+        message: &str,
+    ) -> KernelResult<AgentLoopResult> {
+        let workflows = self.workflows.list_workflows().await;
+        let capabilities = self.list_routing_capabilities(agent_id, &workflows);
+        let catalog = self.build_router_catalog(agent_id, &workflows);
+        let decision = router::decide(message, &catalog).ok_or_else(|| {
+            KernelError::OpenFang(OpenFangError::Internal(
+                "Router found no deterministic target and no fallback agent is available"
+                    .to_string(),
+            ))
+        })?;
+
+        info!(
+            router = %entry.name,
+            router_id = %agent_id,
+            decision = %self.describe_router_target(&decision),
+            explanation = %decision.explanation,
+            "Router selected execution target"
+        );
+
+        if matches!(decision.target, RouterTarget::FallbackAgent { .. }) {
+            let analysis = capability_builder::analyze_gap(message, &capabilities);
+            if analysis.gap_detected {
+                return Ok(self.capability_gap_result(&analysis));
+            }
+        }
+
+        match &decision.target {
+            RouterTarget::Hand { hand_id } => {
+                let instance = self
+                    .hand_registry
+                    .list_instances()
+                    .into_iter()
+                    .find(|instance| instance.hand_id == *hand_id)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        self.activate_hand(hand_id, std::collections::HashMap::new())
+                    })?;
+                let target_agent = instance.agent_id.ok_or_else(|| {
+                    KernelError::OpenFang(OpenFangError::Internal(format!(
+                        "Hand '{}' has no active agent",
+                        hand_id
+                    )))
+                })?;
+                let mut result =
+                    Box::pin(self.send_message(target_agent, &decision.forward_message)).await?;
+                if !result.response.is_empty() {
+                    result.response =
+                        format!("[Router] {}\n\n{}", decision.explanation, result.response);
+                }
+                Ok(result)
+            }
+            RouterTarget::Workflow {
+                workflow_id,
+                workflow_name,
+            } => {
+                let (run_id, output) = self
+                    .run_workflow(*workflow_id, decision.forward_message.clone())
+                    .await?;
+                Ok(AgentLoopResult {
+                    response: format!(
+                        "[Router] {}.\n\nWorkflow '{}' completed as run {}.\n\n{}",
+                        decision.explanation, workflow_name, run_id, output
+                    ),
+                    total_usage: openfang_types::message::TokenUsage {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                    cost_usd: None,
+                    iterations: 1,
+                    silent: false,
+                    directives: Default::default(),
+                })
+            }
+            RouterTarget::Agent {
+                agent_id: target_agent,
+                ..
+            }
+            | RouterTarget::FallbackAgent {
+                agent_id: target_agent,
+                ..
+            } => {
+                let mut result =
+                    Box::pin(self.send_message(*target_agent, &decision.forward_message)).await?;
+                if !result.response.is_empty() {
+                    result.response =
+                        format!("[Router] {}\n\n{}", decision.explanation, result.response);
+                }
+                Ok(result)
+            }
+        }
+    }
+
+    fn capability_gap_result(&self, analysis: &CapabilityGapAnalysis) -> AgentLoopResult {
+        AgentLoopResult {
+            response: capability_builder::render_gap_summary(analysis),
+            total_usage: openfang_types::message::TokenUsage {
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            cost_usd: None,
+            iterations: 1,
+            silent: false,
+            directives: Default::default(),
+        }
     }
 
     /// Execute the default LLM-based agent loop.
@@ -2924,9 +3171,19 @@ impl OpenFangKernel {
             if let Ok(mcp_tools) = self.mcp_tools.lock() {
                 let mut known_servers: std::collections::HashSet<String> =
                     std::collections::HashSet::new();
+                let configured_servers: Vec<String> = self
+                    .effective_mcp_servers
+                    .read()
+                    .map(|servers| servers.iter().map(|s| s.name.clone()).collect())
+                    .unwrap_or_default();
+                let configured_refs: Vec<&str> =
+                    configured_servers.iter().map(String::as_str).collect();
                 for tool in mcp_tools.iter() {
-                    if let Some(s) = openfang_runtime::mcp::extract_mcp_server(&tool.name) {
-                        known_servers.insert(s.to_string());
+                    if let Some(s) = openfang_runtime::mcp::extract_mcp_server_from_known(
+                        &tool.name,
+                        &configured_refs,
+                    ) {
+                        known_servers.insert(openfang_runtime::mcp::normalize_name(s));
                     }
                 }
                 for name in &servers {
@@ -3193,6 +3450,16 @@ impl OpenFangKernel {
         hand_id: &str,
         config: std::collections::HashMap<String, serde_json::Value>,
     ) -> KernelResult<openfang_hands::HandInstance> {
+        self.activate_hand_with_identity(hand_id, config, None, None)
+    }
+
+    fn activate_hand_with_identity(
+        &self,
+        hand_id: &str,
+        config: std::collections::HashMap<String, serde_json::Value>,
+        preferred_instance_id: Option<uuid::Uuid>,
+        preferred_status: Option<openfang_hands::HandStatus>,
+    ) -> KernelResult<openfang_hands::HandInstance> {
         use openfang_hands::HandError;
 
         let def = self
@@ -3208,7 +3475,7 @@ impl OpenFangKernel {
         // Create the instance in the registry
         let instance = self
             .hand_registry
-            .activate(hand_id, config)
+            .activate_with_state(hand_id, config, preferred_instance_id, preferred_status)
             .map_err(|e| match e {
                 HandError::AlreadyActive(id) => KernelError::OpenFang(OpenFangError::Internal(
                     format!("Hand already active: {id}"),
@@ -3431,16 +3698,71 @@ impl OpenFangKernel {
 
     /// Pause a hand (marks it paused; agent stays alive but won't receive new work).
     pub fn pause_hand(&self, instance_id: uuid::Uuid) -> KernelResult<()> {
+        let current = self
+            .hand_registry
+            .get_instance(instance_id)
+            .ok_or_else(|| {
+                KernelError::OpenFang(OpenFangError::Internal(format!(
+                    "Hand instance not found: {instance_id}"
+                )))
+            })?;
+        if current.status != openfang_hands::HandStatus::Active {
+            return Err(KernelError::OpenFang(OpenFangError::InvalidState {
+                current: format!("{}", current.status),
+                operation: "pause_hand".to_string(),
+            }));
+        }
+
         self.hand_registry
             .pause(instance_id)
-            .map_err(|e| KernelError::OpenFang(OpenFangError::Internal(e.to_string())))
+            .map_err(|e| KernelError::OpenFang(OpenFangError::Internal(e.to_string())))?;
+        if let Some(instance) = self.hand_registry.get_instance(instance_id) {
+            if let Some(agent_id) = instance.agent_id {
+                self.background.stop_agent(agent_id);
+            }
+        }
+        self.persist_hand_state();
+        Ok(())
     }
 
     /// Resume a paused hand.
     pub fn resume_hand(&self, instance_id: uuid::Uuid) -> KernelResult<()> {
+        let current = self
+            .hand_registry
+            .get_instance(instance_id)
+            .ok_or_else(|| {
+                KernelError::OpenFang(OpenFangError::Internal(format!(
+                    "Hand instance not found: {instance_id}"
+                )))
+            })?;
+        if current.status != openfang_hands::HandStatus::Paused {
+            return Err(KernelError::OpenFang(OpenFangError::InvalidState {
+                current: format!("{}", current.status),
+                operation: "resume_hand".to_string(),
+            }));
+        }
+
         self.hand_registry
             .resume(instance_id)
-            .map_err(|e| KernelError::OpenFang(OpenFangError::Internal(e.to_string())))
+            .map_err(|e| KernelError::OpenFang(OpenFangError::Internal(e.to_string())))?;
+        self.persist_hand_state();
+
+        if let Some(instance) = self.hand_registry.get_instance(instance_id) {
+            if let Some(agent_id) = instance.agent_id {
+                if let Some(entry) = self.registry.get(agent_id) {
+                    let schedule = entry.manifest.schedule.clone();
+                    let name = entry.name.clone();
+                    drop(entry);
+                    if !matches!(schedule, ScheduleMode::Reactive) {
+                        if let Some(kernel) = self.self_handle.get().and_then(|w| w.upgrade()) {
+                            kernel.start_background_for_agent(agent_id, &name, &schedule);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Set the weak self-reference for trigger dispatch.
@@ -3448,6 +3770,627 @@ impl OpenFangKernel {
     /// Must be called once after the kernel is wrapped in `Arc`.
     pub fn set_self_handle(self: &Arc<Self>) {
         let _ = self.self_handle.set(Arc::downgrade(self));
+    }
+
+    fn build_router_catalog(
+        &self,
+        router_agent_id: AgentId,
+        workflows: &[Workflow],
+    ) -> RouterCatalog {
+        let capabilities = self.list_routing_capabilities(router_agent_id, workflows);
+        let mut hands = Vec::new();
+        let mut workflow_caps = Vec::new();
+        let mut agents = Vec::new();
+
+        for capability in capabilities {
+            match capability.target {
+                RoutingCapabilityTarget::Hand { hand_id } => hands.push(RouterHand {
+                    hand_id,
+                    name: capability.name,
+                    description: capability.description,
+                }),
+                RoutingCapabilityTarget::Workflow { workflow_id } => {
+                    workflow_caps.push(RouterWorkflow {
+                        workflow_id,
+                        name: capability.name,
+                        description: capability.description,
+                    });
+                }
+                RoutingCapabilityTarget::Agent { agent_id } => agents.push(RouterAgent {
+                    agent_id,
+                    name: capability.name,
+                    description: capability.description,
+                }),
+            }
+        }
+
+        let fallback_agent = self
+            .registry
+            .find_by_name("assistant")
+            .filter(|candidate| {
+                candidate.id != router_agent_id && candidate.manifest.module != "builtin:router"
+            })
+            .map(|candidate| RouterAgent {
+                agent_id: candidate.id,
+                name: candidate.name,
+                description: candidate.manifest.description,
+            })
+            .or_else(|| {
+                agents
+                    .iter()
+                    .find(|candidate| normalize_agent_name(&candidate.name) != "assistant")
+                    .cloned()
+            });
+
+        RouterCatalog {
+            hands,
+            workflows: workflow_caps,
+            agents,
+            fallback_agent,
+        }
+    }
+
+    pub fn list_routing_capabilities(
+        &self,
+        router_agent_id: AgentId,
+        workflows: &[Workflow],
+    ) -> Vec<RoutingCapability> {
+        let mut capabilities = Vec::new();
+
+        for def in self.hand_registry.list_definitions() {
+            let hand_id = def.id.clone();
+            let mut tags = vec![
+                "hand".to_string(),
+                format!("hand:{}", hand_id),
+                format!("category:{}", def.category).to_lowercase(),
+            ];
+            tags.extend(def.tools.iter().map(|tool| format!("tool:{tool}")));
+
+            let mut keywords = tokenize_route_text(&hand_id);
+            keywords.extend(tokenize_route_text(&def.name));
+            keywords.extend(tokenize_route_text(&def.description));
+            keywords.extend(hand_seed_keywords(&hand_id));
+            keywords.sort();
+            keywords.dedup();
+
+            capabilities.push(RoutingCapability {
+                kind: RoutingCapabilityKind::Hand,
+                id: hand_id.clone(),
+                name: def.name,
+                description: def.description,
+                tags,
+                keywords,
+                target: RoutingCapabilityTarget::Hand { hand_id },
+            });
+        }
+
+        for workflow in workflows {
+            let mut tags = vec!["workflow".to_string()];
+            let mut keywords = tokenize_route_text(&workflow.name);
+            keywords.extend(tokenize_route_text(&workflow.description));
+            for step in &workflow.steps {
+                keywords.extend(tokenize_route_text(&step.name));
+                if let StepAgent::ByName { name } = &step.agent {
+                    tags.push(format!("step_agent:{name}"));
+                    keywords.extend(tokenize_route_text(name));
+                }
+            }
+            keywords.sort();
+            keywords.dedup();
+
+            capabilities.push(RoutingCapability {
+                kind: RoutingCapabilityKind::Workflow,
+                id: workflow.id.to_string(),
+                name: workflow.name.clone(),
+                description: workflow.description.clone(),
+                tags,
+                keywords,
+                target: RoutingCapabilityTarget::Workflow {
+                    workflow_id: workflow.id,
+                },
+            });
+        }
+
+        for entry in self.registry.list() {
+            if entry.id == router_agent_id || entry.manifest.module == "builtin:router" {
+                continue;
+            }
+
+            let mut tags = entry.tags.clone();
+            tags.push("agent".to_string());
+            tags.extend(
+                entry
+                    .manifest
+                    .capabilities
+                    .tools
+                    .iter()
+                    .map(|tool| format!("tool:{tool}")),
+            );
+
+            let mut keywords = tokenize_route_text(&entry.name);
+            keywords.extend(tokenize_route_text(&entry.manifest.description));
+            for tag in &entry.tags {
+                keywords.extend(tokenize_route_text(tag));
+            }
+            keywords.sort();
+            keywords.dedup();
+
+            capabilities.push(RoutingCapability {
+                kind: RoutingCapabilityKind::Agent,
+                id: entry.id.to_string(),
+                name: entry.name,
+                description: entry.manifest.description,
+                tags,
+                keywords,
+                target: RoutingCapabilityTarget::Agent { agent_id: entry.id },
+            });
+        }
+
+        capabilities
+    }
+
+    pub fn analyze_capability_gap(
+        &self,
+        router_agent_id: AgentId,
+        workflows: &[Workflow],
+        message: &str,
+    ) -> CapabilityGapAnalysis {
+        let capabilities = self.list_routing_capabilities(router_agent_id, workflows);
+        capability_builder::analyze_gap(message, &capabilities)
+    }
+
+    pub fn get_capability_proposal_job(&self, job_id: uuid::Uuid) -> Option<CapabilityProposalJob> {
+        self.proposal_jobs.get(&job_id).map(|job| job.clone())
+    }
+
+    pub fn list_capability_proposal_jobs(&self) -> Vec<CapabilityProposalJob> {
+        let mut jobs = self
+            .proposal_jobs
+            .iter()
+            .map(|job| job.value().clone())
+            .collect::<Vec<_>>();
+        jobs.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        jobs
+    }
+
+    fn proposal_jobs_path(&self) -> PathBuf {
+        self.config.home_dir.join("proposal_jobs.json")
+    }
+
+    fn persist_capability_proposal_jobs(&self) {
+        let mut jobs = self
+            .proposal_jobs
+            .iter()
+            .map(|job| job.value().clone())
+            .collect::<Vec<_>>();
+        jobs.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+
+        let path = self.proposal_jobs_path();
+        let json = match serde_json::to_string_pretty(&jobs) {
+            Ok(json) => json,
+            Err(error) => {
+                warn!(error = %error, "Failed to serialize proposal jobs");
+                return;
+            }
+        };
+        if let Err(error) = std::fs::write(&path, json) {
+            warn!(path = %path.display(), error = %error, "Failed to persist proposal jobs");
+        }
+    }
+
+    fn load_persisted_capability_proposal_jobs(&self) {
+        let path = self.proposal_jobs_path();
+        let data = match std::fs::read_to_string(&path) {
+            Ok(data) => data,
+            Err(_) => return,
+        };
+        let mut jobs: Vec<CapabilityProposalJob> = match serde_json::from_str(&data) {
+            Ok(jobs) => jobs,
+            Err(error) => {
+                warn!(path = %path.display(), error = %error, "Failed to parse proposal jobs");
+                return;
+            }
+        };
+
+        let mut changed = false;
+        for job in &mut jobs {
+            if matches!(
+                job.status,
+                CapabilityProposalJobStatus::PendingApproval
+                    | CapabilityProposalJobStatus::Applying
+            ) {
+                job.status = CapabilityProposalJobStatus::Failed;
+                job.updated_at = chrono::Utc::now();
+                job.error = Some(
+                    "proposal job was interrupted by daemon restart before completion".to_string(),
+                );
+                job.outcome = None;
+                changed = true;
+            } else if matches!(job.status, CapabilityProposalJobStatus::TimedOut) && job.error.is_none() {
+                job.error = Some(
+                    "proposal approval timed out (daemon restarted before timeout was recorded)"
+                        .to_string(),
+                );
+                job.updated_at = chrono::Utc::now();
+                changed = true;
+            }
+            self.proposal_jobs.insert(job.job_id, job.clone());
+        }
+
+        if !jobs.is_empty() {
+            info!("Restored {} persisted proposal job(s)", jobs.len());
+        }
+        if changed {
+            self.persist_capability_proposal_jobs();
+        }
+    }
+
+    pub fn submit_capability_proposal(
+        self: &Arc<Self>,
+        proposal: CapabilityProposal,
+        activate_after_create: bool,
+    ) -> Result<CapabilityProposalJob, String> {
+        let job_id = uuid::Uuid::new_v4();
+        let approval_id = uuid::Uuid::new_v4();
+        let policy = self.approval_manager.policy();
+        let now = chrono::Utc::now();
+
+        let job = CapabilityProposalJob {
+            job_id,
+            approval_id,
+            proposal: proposal.clone(),
+            activate_after_create,
+            status: CapabilityProposalJobStatus::PendingApproval,
+            created_at: now,
+            updated_at: now,
+            error: None,
+            outcome: None,
+        };
+        self.proposal_jobs.insert(job_id, job.clone());
+        self.persist_capability_proposal_jobs();
+
+        let approval_req = openfang_types::approval::ApprovalRequest {
+            id: approval_id,
+            agent_id: "system".to_string(),
+            tool_name: "capability_apply".to_string(),
+            description: format!("Apply capability proposal '{}'", proposal.name),
+            action_summary: format!(
+                "Create {} '{}'",
+                match proposal.kind {
+                    capability_builder::CapabilityProposalKind::Agent => "agent",
+                    capability_builder::CapabilityProposalKind::Hand => "hand",
+                    capability_builder::CapabilityProposalKind::Workflow => "workflow",
+                },
+                proposal.name
+            ),
+            risk_level: openfang_types::approval::RiskLevel::High,
+            requested_at: now,
+            timeout_secs: policy.timeout_secs,
+        };
+
+        self.spawn_capability_proposal_listener(job_id, approval_req);
+
+        Ok(job)
+    }
+
+    fn spawn_capability_proposal_listener(
+        self: &Arc<Self>,
+        job_id: uuid::Uuid,
+        approval_req: openfang_types::approval::ApprovalRequest,
+    ) {
+        let kernel = Arc::clone(self);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let decision = kernel.approval_manager.request_approval(approval_req).await;
+                kernel
+                    .resolve_capability_proposal_job(job_id, decision)
+                    .await;
+            });
+            return;
+        }
+
+        std::thread::spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    kernel.update_capability_proposal_job(job_id, |job| {
+                        job.status = CapabilityProposalJobStatus::Failed;
+                        job.updated_at = chrono::Utc::now();
+                        job.error = Some(format!(
+                            "failed to create runtime for approval listener: {error}"
+                        ));
+                    });
+                    return;
+                }
+            };
+
+            runtime.block_on(async move {
+                let decision = kernel.approval_manager.request_approval(approval_req).await;
+                kernel
+                    .resolve_capability_proposal_job(job_id, decision)
+                    .await;
+            });
+        });
+    }
+
+    async fn resolve_capability_proposal_job(
+        self: Arc<Self>,
+        job_id: uuid::Uuid,
+        decision: openfang_types::approval::ApprovalDecision,
+    ) {
+        match decision {
+            openfang_types::approval::ApprovalDecision::Approved => {
+                self.update_capability_proposal_job(job_id, |job| {
+                    job.status = CapabilityProposalJobStatus::Applying;
+                    job.updated_at = chrono::Utc::now();
+                    job.error = None;
+                });
+
+                let Some(job) = self.get_capability_proposal_job(job_id) else {
+                    return;
+                };
+
+                match self
+                    .apply_capability_proposal(&job.proposal, job.activate_after_create)
+                    .await
+                {
+                    Ok(outcome) => self.update_capability_proposal_job(job_id, |job| {
+                        job.status = CapabilityProposalJobStatus::Applied;
+                        job.updated_at = chrono::Utc::now();
+                        job.outcome = Some(outcome);
+                        job.error = None;
+                    }),
+                    Err(error) => self.update_capability_proposal_job(job_id, |job| {
+                        job.status = CapabilityProposalJobStatus::Failed;
+                        job.updated_at = chrono::Utc::now();
+                        job.error = Some(error);
+                    }),
+                }
+            }
+            openfang_types::approval::ApprovalDecision::Denied => {
+                self.update_capability_proposal_job(job_id, |job| {
+                    job.status = CapabilityProposalJobStatus::Rejected;
+                    job.updated_at = chrono::Utc::now();
+                    job.error = Some("proposal approval was rejected".to_string());
+                });
+            }
+            openfang_types::approval::ApprovalDecision::TimedOut => {
+                self.update_capability_proposal_job(job_id, |job| {
+                    job.status = CapabilityProposalJobStatus::TimedOut;
+                    job.updated_at = chrono::Utc::now();
+                    job.error = Some("proposal approval timed out".to_string());
+                });
+            }
+        }
+    }
+
+    fn update_capability_proposal_job<F>(&self, job_id: uuid::Uuid, update: F)
+    where
+        F: FnOnce(&mut CapabilityProposalJob),
+    {
+        let found = if let Some(mut job) = self.proposal_jobs.get_mut(&job_id) {
+            update(job.value_mut());
+            true
+        } else {
+            false
+        };
+        if found {
+            self.persist_capability_proposal_jobs();
+        }
+    }
+
+    async fn apply_capability_proposal(
+        &self,
+        proposal: &CapabilityProposal,
+        activate_after_create: bool,
+    ) -> Result<CapabilityApplyOutcome, String> {
+        match proposal.kind {
+            capability_builder::CapabilityProposalKind::Agent => {
+                let manifest_toml = proposal
+                    .agent_manifest_toml
+                    .as_ref()
+                    .ok_or_else(|| "agent proposal is missing manifest_toml".to_string())?;
+                let manifest: AgentManifest = toml::from_str(manifest_toml)
+                    .map_err(|e| format!("invalid agent manifest_toml: {e}"))?;
+                let name = manifest.name.clone();
+                let agent_id = self
+                    .spawn_agent(manifest)
+                    .map_err(|e| format!("failed to spawn proposed agent: {e}"))?;
+                Ok(CapabilityApplyOutcome::Agent {
+                    agent_id: agent_id.to_string(),
+                    name,
+                })
+            }
+            capability_builder::CapabilityProposalKind::Workflow => {
+                if self.workflow_name_exists(&proposal.name).await {
+                    return Err(format!(
+                        "workflow '{}' already exists; rename the proposal before applying it",
+                        proposal.name
+                    ));
+                }
+                let workflow = proposal
+                    .workflow
+                    .as_ref()
+                    .ok_or_else(|| "workflow proposal is missing workflow steps".to_string())?;
+                let steps = workflow
+                    .steps
+                    .iter()
+                    .map(|step| {
+                        Ok(crate::workflow::WorkflowStep {
+                            name: step.name.clone(),
+                            agent: crate::workflow::StepAgent::ByName {
+                                name: self
+                                    .resolve_workflow_step_agent_name(&step.agent_name_hint)?,
+                            },
+                            prompt_template: step.prompt_template.clone(),
+                            mode: crate::workflow::StepMode::Sequential,
+                            timeout_secs: 120,
+                            error_mode: crate::workflow::ErrorMode::Fail,
+                            output_var: None,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                let workflow = Workflow {
+                    id: crate::workflow::WorkflowId(uuid::Uuid::new_v4()),
+                    name: proposal.name.clone(),
+                    description: proposal.description.clone(),
+                    steps,
+                    created_at: chrono::Utc::now(),
+                };
+                let name = workflow.name.clone();
+                let workflow_id = workflow.id;
+                self.workflows.register(workflow).await;
+                Ok(CapabilityApplyOutcome::Workflow {
+                    workflow_id: workflow_id.to_string(),
+                    name,
+                })
+            }
+            capability_builder::CapabilityProposalKind::Hand => {
+                let hand_toml = proposal
+                    .hand_toml
+                    .as_ref()
+                    .ok_or_else(|| "hand proposal is missing hand_toml".to_string())?;
+                let hand = self
+                    .upsert_hand_definition(hand_toml, "")
+                    .map_err(|e| format!("failed to install proposed hand: {e}"))?;
+                let (activated, instance_id) = if activate_after_create {
+                    let instance = self
+                        .activate_hand(&hand.id, std::collections::HashMap::new())
+                        .map_err(|e| format!("failed to activate proposed hand: {e}"))?;
+                    (true, Some(instance.instance_id.to_string()))
+                } else {
+                    (false, None)
+                };
+                Ok(CapabilityApplyOutcome::Hand {
+                    hand_id: hand.id,
+                    activated,
+                    instance_id,
+                })
+            }
+        }
+    }
+
+    fn resolve_workflow_step_agent_name(&self, preferred_name: &str) -> Result<String, String> {
+        if let Some(agent_name) = self.find_non_router_agent_name(preferred_name) {
+            return Ok(agent_name);
+        }
+        if preferred_name != "assistant" {
+            if let Some(agent_name) = self.find_non_router_agent_name("assistant") {
+                return Ok(agent_name);
+            }
+        }
+        if let Some(agent_name) = self
+            .registry
+            .list()
+            .into_iter()
+            .find(|entry| entry.manifest.module != "builtin:router")
+            .map(|entry| entry.name)
+        {
+            return Ok(agent_name);
+        }
+        Err(
+            "no non-router agent is available to back the workflow proposal; create an assistant or specialist agent first"
+                .to_string(),
+        )
+    }
+
+    fn find_non_router_agent_name(&self, preferred_name: &str) -> Option<String> {
+        self.registry
+            .find_by_name(preferred_name)
+            .filter(|entry| entry.manifest.module != "builtin:router")
+            .map(|entry| entry.name)
+    }
+
+    async fn workflow_name_exists(&self, name: &str) -> bool {
+        let normalized = normalize_route_text(name);
+        self.workflows
+            .list_workflows()
+            .await
+            .into_iter()
+            .any(|workflow| normalize_route_text(&workflow.name) == normalized)
+    }
+
+    fn hands_dir(&self) -> PathBuf {
+        self.config.home_dir.join("hands")
+    }
+
+    pub fn install_hand_definition(
+        &self,
+        toml_content: &str,
+        skill_content: &str,
+    ) -> Result<openfang_hands::HandDefinition, String> {
+        self.persist_hand_definition(toml_content, skill_content, false)
+    }
+
+    pub fn upsert_hand_definition(
+        &self,
+        toml_content: &str,
+        skill_content: &str,
+    ) -> Result<openfang_hands::HandDefinition, String> {
+        self.persist_hand_definition(toml_content, skill_content, true)
+    }
+
+    fn persist_hand_definition(
+        &self,
+        toml_content: &str,
+        skill_content: &str,
+        overwrite: bool,
+    ) -> Result<openfang_hands::HandDefinition, String> {
+        let parsed = openfang_hands::bundled::parse_bundled("custom", toml_content, skill_content)
+            .map_err(|e| format!("{e}"))?;
+        let hands_dir = self.hands_dir();
+        let hand_dir = hands_dir.join(&parsed.id);
+
+        if !overwrite
+            && (self.hand_registry.get_definition(&parsed.id).is_some() || hand_dir.exists())
+        {
+            return Err(format!("Hand '{}' already registered", parsed.id));
+        }
+
+        std::fs::create_dir_all(&hand_dir).map_err(|e| {
+            format!(
+                "failed to create hand directory '{}': {e}",
+                hand_dir.display()
+            )
+        })?;
+        std::fs::write(hand_dir.join("HAND.toml"), toml_content)
+            .map_err(|e| format!("failed to write HAND.toml for '{}': {e}", parsed.id))?;
+
+        let skill_path = hand_dir.join("SKILL.md");
+        if skill_content.trim().is_empty() {
+            if skill_path.exists() {
+                std::fs::remove_file(&skill_path).map_err(|e| {
+                    format!("failed to remove stale SKILL.md for '{}': {e}", parsed.id)
+                })?;
+            }
+        } else {
+            std::fs::write(&skill_path, skill_content)
+                .map_err(|e| format!("failed to write SKILL.md for '{}': {e}", parsed.id))?;
+        }
+
+        if overwrite {
+            self.hand_registry
+                .upsert_from_content(toml_content, skill_content)
+                .map_err(|e| format!("{e}"))
+        } else {
+            self.hand_registry
+                .install_from_content(toml_content, skill_content)
+                .map_err(|e| format!("{e}"))
+        }
+    }
+
+    fn describe_router_target(&self, decision: &RouterDecision) -> String {
+        match &decision.target {
+            RouterTarget::Hand { hand_id } => format!("hand:{hand_id}"),
+            RouterTarget::Workflow { workflow_name, .. } => format!("workflow:{workflow_name}"),
+            RouterTarget::Agent { agent_name, .. } => format!("agent:{agent_name}"),
+            RouterTarget::FallbackAgent { agent_name, .. } => {
+                format!("fallback_agent:{agent_name}")
+            }
+        }
     }
 
     // ─── Agent Binding management ──────────────────────────────────────
@@ -3486,7 +4429,7 @@ impl OpenFangKernel {
         };
 
         // Read and parse config file (using load_config to process $include directives)
-        let config_path = self.config.home_dir.join("config.toml");
+        let config_path = self.config_path().to_path_buf();
         let new_config = if config_path.exists() {
             crate::config::load_config(Some(&config_path))
         } else {
@@ -3753,23 +4696,28 @@ impl OpenFangKernel {
         let saved_hands = openfang_hands::registry::HandRegistry::load_state(&state_path);
         if !saved_hands.is_empty() {
             info!("Restoring {} persisted hand(s)", saved_hands.len());
-            for (hand_id, config, old_agent_id) in saved_hands {
-                match self.activate_hand(&hand_id, config) {
+            for saved in saved_hands {
+                match self.activate_hand_with_identity(
+                    &saved.hand_id,
+                    saved.config,
+                    saved.instance_id,
+                    Some(saved.status),
+                ) {
                     Ok(inst) => {
-                        info!(hand = %hand_id, instance = %inst.instance_id, "Hand restored");
+                        info!(hand = %saved.hand_id, instance = %inst.instance_id, "Hand restored");
                         // Reassign cron jobs and triggers from the pre-restart
                         // agent ID to the newly spawned agent so scheduled tasks
                         // and event triggers survive daemon restarts (issues
                         // #402, #519). activate_hand only handles reassignment
                         // when an existing agent is found in the live registry,
                         // which is empty on a fresh boot.
-                        if let (Some(old_id), Some(new_id)) = (old_agent_id, inst.agent_id) {
+                        if let (Some(old_id), Some(new_id)) = (saved.agent_id, inst.agent_id) {
                             if old_id != new_id {
                                 let migrated =
                                     self.cron_scheduler.reassign_agent_jobs(old_id, new_id);
                                 if migrated > 0 {
                                     info!(
-                                        hand = %hand_id,
+                                        hand = %saved.hand_id,
                                         old_agent = %old_id,
                                         new_agent = %new_id,
                                         migrated,
@@ -3788,7 +4736,7 @@ impl OpenFangKernel {
                                     self.triggers.reassign_agent_triggers(old_id, new_id);
                                 if t_migrated > 0 {
                                     info!(
-                                        hand = %hand_id,
+                                        hand = %saved.hand_id,
                                         old_agent = %old_id,
                                         new_agent = %new_id,
                                         migrated = t_migrated,
@@ -3798,7 +4746,7 @@ impl OpenFangKernel {
                             }
                         }
                     }
-                    Err(e) => warn!(hand = %hand_id, error = %e, "Failed to restore hand"),
+                    Err(e) => warn!(hand = %saved.hand_id, error = %e, "Failed to restore hand"),
                 }
             }
         }
@@ -3808,6 +4756,13 @@ impl OpenFangKernel {
 
         for entry in &agents {
             if matches!(entry.manifest.schedule, ScheduleMode::Reactive) {
+                continue;
+            }
+            if self
+                .hand_registry
+                .find_by_agent(entry.id)
+                .is_some_and(|hand| hand.status == openfang_hands::HandStatus::Paused)
+            {
                 continue;
             }
             bg_agents.push((
@@ -4720,66 +5675,13 @@ impl OpenFangKernel {
 
     /// Connect to all configured MCP servers and cache their tool definitions.
     async fn connect_mcp_servers(self: &Arc<Self>) {
-        use openfang_runtime::mcp::{McpConnection, McpServerConfig, McpTransport};
-        use openfang_types::config::McpTransportEntry;
-
         let servers = self
             .effective_mcp_servers
             .read()
             .map(|s| s.clone())
             .unwrap_or_default();
-
-        for server_config in &servers {
-            let transport = match &server_config.transport {
-                McpTransportEntry::Stdio { command, args } => McpTransport::Stdio {
-                    command: command.clone(),
-                    args: args.clone(),
-                },
-                McpTransportEntry::Sse { url } => McpTransport::Sse { url: url.clone() },
-            };
-
-            let mcp_config = McpServerConfig {
-                name: server_config.name.clone(),
-                transport,
-                timeout_secs: server_config.timeout_secs,
-                env: server_config.env.clone(),
-            };
-
-            match McpConnection::connect(mcp_config).await {
-                Ok(conn) => {
-                    let tool_count = conn.tools().len();
-                    // Cache tool definitions
-                    if let Ok(mut tools) = self.mcp_tools.lock() {
-                        tools.extend(conn.tools().iter().cloned());
-                    }
-                    info!(
-                        server = %server_config.name,
-                        tools = tool_count,
-                        "MCP server connected"
-                    );
-                    // Update extension health if this is an extension-provided server
-                    self.extension_health
-                        .report_ok(&server_config.name, tool_count);
-                    self.mcp_connections.lock().await.push(conn);
-                }
-                Err(e) => {
-                    warn!(
-                        server = %server_config.name,
-                        error = %e,
-                        "Failed to connect to MCP server"
-                    );
-                    self.extension_health
-                        .report_error(&server_config.name, e.to_string());
-                }
-            }
-        }
-
-        let tool_count = self.mcp_tools.lock().map(|t| t.len()).unwrap_or(0);
-        if tool_count > 0 {
-            info!(
-                "MCP: {tool_count} tools available from {} server(s)",
-                self.mcp_connections.lock().await.len()
-            );
+        if let Err(e) = self.apply_mcp_server_configs(servers).await {
+            warn!(error = %e, "Failed to initialize MCP server connections");
         }
     }
 
@@ -4787,9 +5689,6 @@ impl OpenFangKernel {
     ///
     /// Called by the API reload endpoint after CLI installs/removes integrations.
     pub async fn reload_extension_mcps(self: &Arc<Self>) -> Result<usize, String> {
-        use openfang_runtime::mcp::{McpConnection, McpServerConfig, McpTransport};
-        use openfang_types::config::McpTransportEntry;
-
         // 1. Reload installed integrations from disk
         let installed_count = {
             let mut registry = self
@@ -4799,45 +5698,85 @@ impl OpenFangKernel {
             registry.load_installed().map_err(|e| e.to_string())?
         };
 
-        // 2. Rebuild effective MCP server list
-        let new_configs = {
-            let registry = self
-                .extension_registry
-                .read()
-                .unwrap_or_else(|e| e.into_inner());
-            let ext_mcp_configs = registry.to_mcp_configs();
-            let mut all = self.config.mcp_servers.clone();
-            for ext_cfg in ext_mcp_configs {
-                if !all.iter().any(|s| s.name == ext_cfg.name) {
-                    all.push(ext_cfg);
-                }
-            }
-            all
-        };
+        let manual_configs = self.load_manual_mcp_server_configs_from_disk()?;
+        let effective_configs = self.build_effective_mcp_server_configs(&manual_configs);
+        let connected_count = self.apply_mcp_server_configs(effective_configs).await?;
 
-        // 3. Find servers that aren't already connected
-        let already_connected: Vec<String> = self
-            .mcp_connections
-            .lock()
-            .await
-            .iter()
-            .map(|c| c.name().to_string())
-            .collect();
+        info!(
+            "Extension reload: {} installed, {} active connections",
+            installed_count, connected_count
+        );
+        Ok(connected_count)
+    }
 
-        let new_servers: Vec<_> = new_configs
-            .iter()
-            .filter(|s| !already_connected.contains(&s.name))
-            .cloned()
-            .collect();
+    /// Reload manual MCP server configuration from disk and rebuild live connections.
+    pub async fn reload_mcp_servers_from_disk(self: &Arc<Self>) -> Result<usize, String> {
+        let manual_configs = self.load_manual_mcp_server_configs_from_disk()?;
+        let effective_configs = self.build_effective_mcp_server_configs(&manual_configs);
+        let connected_count = self.apply_mcp_server_configs(effective_configs).await?;
+        info!(
+            "MCP reload from disk complete: {} active connection(s)",
+            connected_count
+        );
+        Ok(connected_count)
+    }
 
-        // 4. Update effective list
-        if let Ok(mut effective) = self.effective_mcp_servers.write() {
-            *effective = new_configs;
+    fn load_manual_mcp_server_configs_from_disk(
+        &self,
+    ) -> Result<Vec<openfang_types::config::McpServerConfigEntry>, String> {
+        let config_path = self.config_path().to_path_buf();
+        if !config_path.exists() {
+            return Ok(self.config.mcp_servers.clone());
         }
 
-        // 5. Connect new servers
+        Ok(crate::config::load_config(Some(&config_path)).mcp_servers)
+    }
+
+    fn build_effective_mcp_server_configs(
+        &self,
+        manual_configs: &[openfang_types::config::McpServerConfigEntry],
+    ) -> Vec<openfang_types::config::McpServerConfigEntry> {
+        let registry = self
+            .extension_registry
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        let mut effective = manual_configs.to_vec();
+        for ext_cfg in registry.to_mcp_configs() {
+            if !effective.iter().any(|server| server.name == ext_cfg.name) {
+                effective.push(ext_cfg);
+            }
+        }
+        effective
+    }
+
+    async fn apply_mcp_server_configs(
+        self: &Arc<Self>,
+        servers: Vec<openfang_types::config::McpServerConfigEntry>,
+    ) -> Result<usize, String> {
+        use openfang_runtime::mcp::{McpConnection, McpServerConfig, McpTransport};
+        use openfang_types::config::McpTransportEntry;
+
+        let previous_names: std::collections::HashSet<String> = self
+            .effective_mcp_servers
+            .read()
+            .map(|configs| configs.iter().map(|config| config.name.clone()).collect())
+            .unwrap_or_default();
+        let next_names: std::collections::HashSet<String> =
+            servers.iter().map(|config| config.name.clone()).collect();
+
+        {
+            let mut connections = self.mcp_connections.lock().await;
+            connections.clear();
+        }
+        if let Ok(mut tools) = self.mcp_tools.lock() {
+            tools.clear();
+        }
+        if let Ok(mut effective) = self.effective_mcp_servers.write() {
+            *effective = servers.clone();
+        }
+
         let mut connected_count = 0;
-        for server_config in &new_servers {
+        for server_config in &servers {
             let transport = match &server_config.transport {
                 McpTransportEntry::Stdio { command, args } => McpTransport::Stdio {
                     command: command.clone(),
@@ -4866,58 +5805,33 @@ impl OpenFangKernel {
                     info!(
                         server = %server_config.name,
                         tools = tool_count,
-                        "Extension MCP server connected (hot-reload)"
+                        "MCP server connected"
                     );
                     self.mcp_connections.lock().await.push(conn);
                     connected_count += 1;
                 }
                 Err(e) => {
-                    self.extension_health
-                        .report_error(&server_config.name, e.to_string());
                     warn!(
                         server = %server_config.name,
                         error = %e,
-                        "Failed to connect extension MCP server"
+                        "Failed to connect to MCP server"
                     );
+                    self.extension_health
+                        .report_error(&server_config.name, e.to_string());
                 }
             }
         }
 
-        // 6. Remove connections for uninstalled integrations
-        let removed: Vec<String> = already_connected
-            .iter()
-            .filter(|name| {
-                let effective = self
-                    .effective_mcp_servers
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner());
-                !effective.iter().any(|s| &s.name == *name)
-            })
-            .cloned()
-            .collect();
-
-        if !removed.is_empty() {
-            let mut conns = self.mcp_connections.lock().await;
-            conns.retain(|c| !removed.contains(&c.name().to_string()));
-            // Rebuild tool cache
-            if let Ok(mut tools) = self.mcp_tools.lock() {
-                tools.clear();
-                for conn in conns.iter() {
-                    tools.extend(conn.tools().iter().cloned());
-                }
-            }
-            for name in &removed {
-                self.extension_health.unregister(name);
-                info!(server = %name, "Extension MCP server disconnected (removed)");
-            }
+        for removed in previous_names.difference(&next_names) {
+            self.extension_health.unregister(removed);
+            info!(server = %removed, "MCP server disconnected (removed)");
         }
 
-        info!(
-            "Extension reload: {} installed, {} new connections, {} removed",
-            installed_count,
-            connected_count,
-            removed.len()
-        );
+        let tool_count = self.mcp_tools.lock().map(|tools| tools.len()).unwrap_or(0);
+        if tool_count > 0 {
+            info!("MCP: {tool_count} tools available from {connected_count} server(s)");
+        }
+
         Ok(connected_count)
     }
 
@@ -5125,6 +6039,13 @@ impl OpenFangKernel {
         // Step 3: Add MCP tools (filtered by agent's MCP server allowlist,
         // then by declared tools).
         if let Ok(mcp_tools) = self.mcp_tools.lock() {
+            let configured_servers: Vec<String> = self
+                .effective_mcp_servers
+                .read()
+                .map(|servers| servers.iter().map(|s| s.name.clone()).collect())
+                .unwrap_or_default();
+            let configured_refs: Vec<&str> =
+                configured_servers.iter().map(String::as_str).collect();
             let mcp_candidates: Vec<ToolDefinition> = if mcp_allowlist.is_empty() {
                 mcp_tools.iter().cloned().collect()
             } else {
@@ -5135,9 +6056,15 @@ impl OpenFangKernel {
                 mcp_tools
                     .iter()
                     .filter(|t| {
-                        openfang_runtime::mcp::extract_mcp_server(&t.name)
-                            .map(|s| normalized.iter().any(|n| n == s))
-                            .unwrap_or(false)
+                        openfang_runtime::mcp::extract_mcp_server_from_known(
+                            &t.name,
+                            &configured_refs,
+                        )
+                        .map(|s| {
+                            let server = openfang_runtime::mcp::normalize_name(s);
+                            normalized.iter().any(|n| n == &server)
+                        })
+                        .unwrap_or(false)
                     })
                     .cloned()
                     .collect()
@@ -5265,23 +6192,37 @@ impl OpenFangKernel {
             .iter()
             .map(|s| openfang_runtime::mcp::normalize_name(s))
             .collect();
+        let configured_servers: Vec<String> = self
+            .effective_mcp_servers
+            .read()
+            .map(|servers| servers.iter().map(|s| s.name.clone()).collect())
+            .unwrap_or_default();
+        let configured_refs: Vec<&str> = configured_servers.iter().map(String::as_str).collect();
 
         // Group tools by MCP server prefix (mcp_{server}_{tool})
         let mut servers: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
         let mut tool_count = 0usize;
         for tool in &tools {
-            let parts: Vec<&str> = tool.name.splitn(3, '_').collect();
-            if parts.len() >= 3 && parts[0] == "mcp" {
-                let server = parts[1].to_string();
+            if let Some(server) =
+                openfang_runtime::mcp::extract_mcp_server_from_known(&tool.name, &configured_refs)
+            {
+                let normalized_server = openfang_runtime::mcp::normalize_name(server);
                 // Filter by MCP allowlist if set
-                if !mcp_allowlist.is_empty() && !normalized.iter().any(|n| n == &server) {
+                if !mcp_allowlist.is_empty() && !normalized.iter().any(|n| n == &normalized_server)
+                {
                     continue;
                 }
+                let prefix = format!("mcp_{}_", normalized_server);
+                let tool_label = tool
+                    .name
+                    .strip_prefix(&prefix)
+                    .unwrap_or(tool.name.as_str())
+                    .to_string();
                 servers
-                    .entry(server)
+                    .entry(server.to_string())
                     .or_default()
-                    .push(parts[2..].join("_"));
+                    .push(tool_label);
                 tool_count += 1;
             } else {
                 servers
@@ -5975,24 +6916,6 @@ impl KernelHandle for OpenFangKernel {
         Ok(result)
     }
 
-    async fn hand_install(
-        &self,
-        toml_content: &str,
-        skill_content: &str,
-    ) -> Result<serde_json::Value, String> {
-        let def = self
-            .hand_registry
-            .install_from_content(toml_content, skill_content)
-            .map_err(|e| format!("{e}"))?;
-
-        Ok(serde_json::json!({
-            "id": def.id,
-            "name": def.name,
-            "description": def.description,
-            "category": format!("{:?}", def.category),
-        }))
-    }
-
     async fn hand_activate(
         &self,
         hand_id: &str,
@@ -6648,5 +7571,765 @@ mod tests {
         );
 
         kernel.shutdown();
+    }
+
+    #[test]
+    fn test_hand_identity_survives_restart_restore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-hand-identity-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel = OpenFangKernel::boot_with_config(config.clone()).expect("Kernel should boot");
+        let instance = kernel
+            .activate_hand("lead", HashMap::new())
+            .expect("lead hand should activate");
+        let first_instance_id = instance.instance_id;
+        let first_agent_id = instance.agent_id.expect("lead hand agent id");
+
+        assert_eq!(
+            first_instance_id,
+            openfang_hands::HandInstance::stable_id("lead")
+        );
+        assert_eq!(first_agent_id, AgentId::from_string("lead"));
+
+        kernel.shutdown();
+
+        let restored = Arc::new(
+            OpenFangKernel::boot_with_config(config).expect("Restored kernel should boot"),
+        );
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { restored.start_background_agents() });
+
+        let restored_instance = restored
+            .hand_registry
+            .list_instances()
+            .into_iter()
+            .find(|inst| inst.hand_id == "lead")
+            .expect("lead hand should restore");
+
+        assert_eq!(restored_instance.instance_id, first_instance_id);
+        assert_eq!(restored_instance.agent_id, Some(first_agent_id));
+        assert!(restored.registry.get(first_agent_id).is_some());
+
+        restored.shutdown();
+    }
+
+    #[test]
+    fn test_paused_hand_survives_restart_without_background_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-paused-hand-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel = OpenFangKernel::boot_with_config(config.clone()).expect("Kernel should boot");
+        let instance = kernel
+            .activate_hand("lead", HashMap::new())
+            .expect("lead hand should activate");
+        kernel
+            .pause_hand(instance.instance_id)
+            .expect("lead hand should pause");
+
+        kernel.shutdown();
+
+        let restored = Arc::new(
+            OpenFangKernel::boot_with_config(config).expect("Restored kernel should boot"),
+        );
+        restored.set_self_handle();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { restored.start_background_agents() });
+
+        let restored_instance = restored
+            .hand_registry
+            .get_instance(instance.instance_id)
+            .expect("lead hand should restore");
+        assert_eq!(restored_instance.status, openfang_hands::HandStatus::Paused);
+        assert_eq!(restored.background.active_count(), 0);
+
+        restored.shutdown();
+    }
+
+    #[test]
+    fn test_resume_paused_hand_restarts_background_loop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-paused-resume-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel =
+            Arc::new(OpenFangKernel::boot_with_config(config).expect("Kernel should boot"));
+        kernel.set_self_handle();
+        let instance = kernel
+            .activate_hand("lead", HashMap::new())
+            .expect("lead hand should activate");
+        kernel
+            .pause_hand(instance.instance_id)
+            .expect("lead hand should pause");
+        assert_eq!(kernel.background.active_count(), 0);
+
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { kernel.resume_hand(instance.instance_id) })
+            .expect("lead hand should resume");
+        assert_eq!(
+            kernel
+                .hand_registry
+                .get_instance(instance.instance_id)
+                .expect("resumed instance")
+                .status,
+            openfang_hands::HandStatus::Active
+        );
+        assert_eq!(kernel.background.active_count(), 1);
+
+        kernel.shutdown();
+    }
+
+    #[test]
+    fn test_paused_hand_still_allows_direct_messages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-paused-message-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel =
+            Arc::new(OpenFangKernel::boot_with_config(config).expect("Kernel should boot"));
+        kernel.set_self_handle();
+        let instance = kernel
+            .activate_hand("lead", HashMap::new())
+            .expect("lead hand should activate");
+        let agent_id = instance.agent_id.expect("lead hand agent id");
+        kernel
+            .pause_hand(instance.instance_id)
+            .expect("lead hand should pause");
+
+        let err = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { kernel.send_message(agent_id, "hello").await })
+            .expect_err("test environment should still fail without an LLM provider");
+        assert!(
+            !matches!(
+                err,
+                KernelError::OpenFang(OpenFangError::InvalidState { .. })
+            ),
+            "paused direct messages should not be rejected by hand pause state"
+        );
+
+        kernel.shutdown();
+    }
+
+    #[test]
+    fn test_builtin_router_routes_to_explicit_python_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-router-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let script_path = home_dir.join("echo_agent.py");
+        std::fs::write(
+            &script_path,
+            r#"import json
+import sys
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    print(json.dumps({"type": "response", "text": "ECHO:" + msg["message"]}))
+    sys.stdout.flush()
+"#,
+        )
+        .unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel =
+            Arc::new(OpenFangKernel::boot_with_config(config).expect("Kernel should boot"));
+        let router_id = kernel
+            .spawn_agent(AgentManifest {
+                name: "orchestrator".to_string(),
+                description: "Native router".to_string(),
+                module: "builtin:router".to_string(),
+                ..Default::default()
+            })
+            .expect("router should spawn");
+        kernel
+            .spawn_agent(AgentManifest {
+                name: "echo-specialist".to_string(),
+                description: "Echo specialist".to_string(),
+                module: format!("python:{}", script_path.display()),
+                ..Default::default()
+            })
+            .expect("python specialist should spawn");
+
+        let result = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async {
+                kernel
+                    .send_message(router_id, "agent:echo-specialist route this payload")
+                    .await
+            })
+            .expect("router should forward to explicit agent");
+
+        assert!(result
+            .response
+            .contains("[Router] explicit agent selector matched 'echo-specialist'"));
+        assert!(result.response.contains("ECHO:route this payload"));
+
+        kernel.shutdown();
+    }
+
+    #[test]
+    fn test_routing_capability_registry_includes_hands_workflows_and_agents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-routing-capability-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel = OpenFangKernel::boot_with_config(config).expect("Kernel should boot");
+        let router_id = kernel
+            .spawn_agent(AgentManifest {
+                name: "orchestrator".to_string(),
+                module: "builtin:router".to_string(),
+                ..Default::default()
+            })
+            .expect("router should spawn");
+        let specialist_id = kernel
+            .spawn_agent(AgentManifest {
+                name: "coder".to_string(),
+                description: "Implements patches and code changes".to_string(),
+                tags: vec!["coding".to_string(), "implementation".to_string()],
+                ..Default::default()
+            })
+            .expect("specialist should spawn");
+
+        let workflow = Workflow {
+            id: WorkflowId::new(),
+            name: "daily report".to_string(),
+            description: "Generate a daily report".to_string(),
+            steps: vec![crate::workflow::WorkflowStep {
+                name: "summarize".to_string(),
+                agent: StepAgent::ByName {
+                    name: "coder".to_string(),
+                },
+                prompt_template: "{{input}}".to_string(),
+                mode: crate::workflow::StepMode::Sequential,
+                timeout_secs: 30,
+                error_mode: crate::workflow::ErrorMode::Fail,
+                output_var: None,
+            }],
+            created_at: chrono::Utc::now(),
+        };
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            kernel.register_workflow(workflow.clone()).await;
+            let workflows = kernel.workflows.list_workflows().await;
+            let capabilities = kernel.list_routing_capabilities(router_id, &workflows);
+
+            assert!(capabilities
+                .iter()
+                .any(|cap| { cap.kind == RoutingCapabilityKind::Hand && cap.id == "browser" }));
+            assert!(capabilities.iter().any(|cap| {
+                cap.kind == RoutingCapabilityKind::Workflow && cap.name == "daily report"
+            }));
+            assert!(capabilities.iter().any(|cap| {
+                cap.kind == RoutingCapabilityKind::Agent
+                    && cap.name == "coder"
+                    && matches!(
+                        &cap.target,
+                        RoutingCapabilityTarget::Agent { agent_id } if *agent_id == specialist_id
+                    )
+            }));
+        });
+
+        kernel.shutdown();
+    }
+
+    #[test]
+    fn test_router_returns_builder_draft_for_missing_capability_gap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-capability-gap-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel =
+            Arc::new(OpenFangKernel::boot_with_config(config).expect("Kernel should boot"));
+        let router_id = kernel
+            .spawn_agent(AgentManifest {
+                name: "orchestrator".to_string(),
+                description: "Native router".to_string(),
+                module: "builtin:router".to_string(),
+                ..Default::default()
+            })
+            .expect("router should spawn");
+
+        let result = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async {
+                kernel
+                    .send_message(
+                        router_id,
+                        "automate contract renewal approval escalation weekly",
+                    )
+                    .await
+            })
+            .expect("router should return a draft");
+
+        assert!(result.response.contains("Draft proposal:"));
+        assert!(result
+            .response
+            .contains("Approval required before creation or activation."));
+        assert!(result.response.contains("Kind: workflow"));
+
+        kernel.shutdown();
+    }
+
+    #[test]
+    fn test_builder_hand_persists_across_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-builder-hand-persist-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel =
+            Arc::new(OpenFangKernel::boot_with_config(config.clone()).expect("Kernel should boot"));
+        kernel.set_self_handle();
+
+        let proposal = capability_builder::CapabilityProposal {
+            kind: capability_builder::CapabilityProposalKind::Hand,
+            name: "renewal-monitor".to_string(),
+            description: "Autonomous hand for contract renewal monitoring".to_string(),
+            rationale: "test".to_string(),
+            approval_required: true,
+            tags: vec!["builder:draft".to_string()],
+            keywords: vec!["renewal".to_string(), "contract".to_string()],
+            suggested_tools: vec!["file_read".to_string()],
+            agent_manifest_toml: None,
+            workflow: None,
+            hand: None,
+            hand_toml: Some(
+                r#"id = "renewal-monitor"
+name = "Renewal Monitor"
+description = "Autonomous hand for contract renewal monitoring"
+category = "productivity"
+icon = ""
+tools = ["file_read"]
+
+[agent]
+name = "Renewal Monitor"
+description = "Autonomous hand for contract renewal monitoring"
+module = "builtin:chat"
+provider = "default"
+model = "default"
+max_tokens = 1024
+temperature = 0.2
+system_prompt = "Monitor renewals."
+"#
+                .to_string(),
+            ),
+        };
+
+        let outcome = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { kernel.apply_capability_proposal(&proposal, true).await })
+            .expect("hand proposal should apply");
+        assert!(matches!(
+            outcome,
+            capability_builder::CapabilityApplyOutcome::Hand {
+                activated: true,
+                ..
+            }
+        ));
+        assert!(home_dir
+            .join("hands")
+            .join("renewal-monitor")
+            .join("HAND.toml")
+            .exists());
+
+        kernel.shutdown();
+
+        let restored = Arc::new(
+            OpenFangKernel::boot_with_config(config).expect("Restored kernel should boot"),
+        );
+        restored.set_self_handle();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { restored.start_background_agents() });
+
+        assert!(restored
+            .hand_registry
+            .get_definition("renewal-monitor")
+            .is_some());
+        assert!(restored
+            .hand_registry
+            .list_instances()
+            .into_iter()
+            .any(|instance| instance.hand_id == "renewal-monitor"));
+
+        restored.shutdown();
+    }
+
+    #[test]
+    fn test_builder_workflow_does_not_bind_steps_to_router() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp
+            .path()
+            .join("openfang-kernel-builder-workflow-agent-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel =
+            Arc::new(OpenFangKernel::boot_with_config(config).expect("Kernel should boot"));
+        kernel
+            .spawn_agent(AgentManifest {
+                name: "orchestrator".to_string(),
+                module: "builtin:router".to_string(),
+                ..Default::default()
+            })
+            .expect("router should spawn");
+
+        let analysis = capability_builder::analyze_gap(
+            "automate contract renewal approval escalation weekly",
+            &[],
+        );
+        let proposal = analysis.proposal.expect("workflow proposal should exist");
+        let outcome = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { kernel.apply_capability_proposal(&proposal, false).await })
+            .expect("workflow proposal should apply");
+
+        let workflow_id = match outcome {
+            capability_builder::CapabilityApplyOutcome::Workflow { workflow_id, .. } => {
+                workflow_id.parse::<uuid::Uuid>().unwrap()
+            }
+            other => panic!("expected workflow outcome, got {other:?}"),
+        };
+        let workflows = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { kernel.workflows.list_workflows().await });
+        let workflow = workflows
+            .into_iter()
+            .find(|workflow| workflow.id.0 == workflow_id)
+            .expect("workflow should exist");
+        assert!(workflow.steps.iter().all(|step| match &step.agent {
+            StepAgent::ByName { name } => name != "orchestrator",
+            StepAgent::ById { .. } => true,
+        }));
+
+        kernel.shutdown();
+    }
+
+    #[test]
+    fn test_builder_workflow_rejects_duplicate_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp
+            .path()
+            .join("openfang-kernel-builder-workflow-duplicate-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel =
+            Arc::new(OpenFangKernel::boot_with_config(config).expect("Kernel should boot"));
+
+        let existing = Workflow {
+            id: crate::workflow::WorkflowId(uuid::Uuid::new_v4()),
+            name: "renewal-monitor".to_string(),
+            description: "Existing workflow".to_string(),
+            steps: vec![],
+            created_at: chrono::Utc::now(),
+        };
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { kernel.register_workflow(existing).await });
+
+        let proposal = capability_builder::CapabilityProposal {
+            kind: capability_builder::CapabilityProposalKind::Workflow,
+            name: "renewal-monitor".to_string(),
+            description: "Workflow for renewals".to_string(),
+            rationale: "test".to_string(),
+            approval_required: true,
+            tags: vec!["builder:draft".to_string()],
+            keywords: vec!["renewal".to_string()],
+            suggested_tools: vec![],
+            agent_manifest_toml: None,
+            workflow: Some(capability_builder::WorkflowProposal {
+                trigger: "user-invoked goal".to_string(),
+                steps: vec![capability_builder::WorkflowDraftStep {
+                    name: "execute".to_string(),
+                    purpose: "do it".to_string(),
+                    agent_name_hint: "assistant".to_string(),
+                    prompt_template: "{{input}}".to_string(),
+                }],
+            }),
+            hand: None,
+            hand_toml: None,
+        };
+
+        let error = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { kernel.apply_capability_proposal(&proposal, false).await })
+            .expect_err("duplicate workflow names should be rejected");
+        assert!(error.contains("already exists"));
+
+        kernel.shutdown();
+    }
+
+    #[test]
+    fn test_available_tools_includes_hyphenated_mcp_server_allowlist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-mcp-hyphen-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel = OpenFangKernel::boot_with_config(config).expect("Kernel should boot");
+
+        if let Ok(mut effective) = kernel.effective_mcp_servers.write() {
+            *effective = vec![openfang_types::config::McpServerConfigEntry {
+                name: "chrome-devtools".to_string(),
+                transport: openfang_types::config::McpTransportEntry::Stdio {
+                    command: "npx".to_string(),
+                    args: vec!["-y".to_string(), "chrome-devtools-mcp".to_string()],
+                },
+                timeout_secs: 30,
+                env: vec![],
+            }];
+        }
+
+        if let Ok(mut mcp_tools) = kernel.mcp_tools.lock() {
+            *mcp_tools = vec![
+                ToolDefinition {
+                    name: "mcp_chrome_devtools_new_page".to_string(),
+                    description: "Open a new page".to_string(),
+                    input_schema: serde_json::json!({"type": "object"}),
+                },
+                ToolDefinition {
+                    name: "mcp_chrome_devtools_take_snapshot".to_string(),
+                    description: "Take a snapshot".to_string(),
+                    input_schema: serde_json::json!({"type": "object"}),
+                },
+            ];
+        }
+
+        let manifest = AgentManifest {
+            name: "mcp-browser".to_string(),
+            description: "MCP browser test".to_string(),
+            mcp_servers: vec!["chrome-devtools".to_string()],
+            ..Default::default()
+        };
+        let agent_id = kernel
+            .spawn_agent(manifest)
+            .expect("agent with hyphenated mcp allowlist should spawn");
+
+        let tools = kernel.available_tools(agent_id);
+        let tool_names: Vec<String> = tools.into_iter().map(|t| t.name).collect();
+
+        assert!(
+            tool_names
+                .iter()
+                .any(|name| name == "mcp_chrome_devtools_new_page"),
+            "hyphenated MCP allowlist should expose namespaced MCP tools"
+        );
+        assert!(
+            tool_names
+                .iter()
+                .any(|name| name == "mcp_chrome_devtools_take_snapshot"),
+            "all matching tools from the hyphenated MCP server should remain visible"
+        );
+
+        kernel.shutdown();
+    }
+
+    #[test]
+    fn test_submit_capability_proposal_without_runtime_still_completes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-builder-no-runtime-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel =
+            Arc::new(OpenFangKernel::boot_with_config(config).expect("Kernel should boot"));
+        let proposal = capability_builder::CapabilityProposal {
+            kind: capability_builder::CapabilityProposalKind::Agent,
+            name: "runtime-safe-agent".to_string(),
+            description: "Agent created from sync test".to_string(),
+            rationale: "test".to_string(),
+            approval_required: true,
+            tags: vec!["builder:draft".to_string()],
+            keywords: vec!["runtime".to_string(), "safe".to_string()],
+            suggested_tools: vec!["file_read".to_string()],
+            agent_manifest_toml: Some(
+                r#"name = "runtime-safe-agent"
+description = "Agent created from sync test"
+module = "builtin:chat"
+"#
+                .to_string(),
+            ),
+            workflow: None,
+            hand: None,
+            hand_toml: None,
+        };
+
+        let job = kernel
+            .submit_capability_proposal(proposal, false)
+            .expect("proposal submission should succeed");
+
+        for _ in 0..100 {
+            if kernel
+                .approval_manager
+                .list_pending()
+                .iter()
+                .any(|approval| approval.id == job.approval_id)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        kernel
+            .approval_manager
+            .resolve(
+                job.approval_id,
+                openfang_types::approval::ApprovalDecision::Approved,
+                Some("test".to_string()),
+            )
+            .expect("approval should resolve");
+
+        let mut final_job = None;
+        for _ in 0..100 {
+            let current = kernel
+                .get_capability_proposal_job(job.job_id)
+                .expect("job should still exist");
+            if matches!(current.status, CapabilityProposalJobStatus::Applied) {
+                final_job = Some(current);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let final_job = final_job.expect("job should reach applied");
+        assert!(matches!(
+            final_job.outcome,
+            Some(capability_builder::CapabilityApplyOutcome::Agent { .. })
+        ));
+        assert!(kernel.registry.find_by_name("runtime-safe-agent").is_some());
+
+        kernel.shutdown();
+    }
+
+    #[test]
+    fn test_pending_proposal_job_restored_as_failed_after_restart() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home_dir = tmp.path().join("openfang-kernel-builder-job-restore-test");
+        std::fs::create_dir_all(&home_dir).unwrap();
+
+        let config = KernelConfig {
+            home_dir: home_dir.clone(),
+            data_dir: home_dir.join("data"),
+            ..KernelConfig::default()
+        };
+
+        let kernel = OpenFangKernel::boot_with_config(config.clone()).expect("Kernel should boot");
+        let now = chrono::Utc::now();
+        let job = CapabilityProposalJob {
+            job_id: uuid::Uuid::new_v4(),
+            approval_id: uuid::Uuid::new_v4(),
+            proposal: capability_builder::CapabilityProposal {
+                kind: capability_builder::CapabilityProposalKind::Agent,
+                name: "restore-me".to_string(),
+                description: "test".to_string(),
+                rationale: "test".to_string(),
+                approval_required: true,
+                tags: vec!["builder:draft".to_string()],
+                keywords: vec![],
+                suggested_tools: vec![],
+                agent_manifest_toml: None,
+                workflow: None,
+                hand: None,
+                hand_toml: None,
+            },
+            activate_after_create: false,
+            status: CapabilityProposalJobStatus::PendingApproval,
+            created_at: now,
+            updated_at: now,
+            error: None,
+            outcome: None,
+        };
+        kernel.proposal_jobs.insert(job.job_id, job.clone());
+        kernel.persist_capability_proposal_jobs();
+        kernel.shutdown();
+
+        let restored =
+            OpenFangKernel::boot_with_config(config).expect("Restored kernel should boot");
+        let restored_job = restored
+            .get_capability_proposal_job(job.job_id)
+            .expect("proposal job should restore");
+        assert!(matches!(
+            restored_job.status,
+            CapabilityProposalJobStatus::Failed
+        ));
+        assert!(restored_job
+            .error
+            .unwrap_or_default()
+            .contains("daemon restart"));
+
+        restored.shutdown();
     }
 }

@@ -14,6 +14,7 @@ use openfang_kernel::OpenFangKernel;
 use openfang_runtime::kernel_handle::KernelHandle;
 use openfang_runtime::tool_runner::builtin_tool_definitions;
 use openfang_types::agent::{AgentId, AgentIdentity, AgentManifest};
+use openfang_types::backup::RestoreBackupRequest;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
@@ -237,6 +238,118 @@ pub async fn list_agents(State(state): State<Arc<AppState>>) -> impl IntoRespons
     Json(agents)
 }
 
+/// GET /api/routing/capabilities — List routing-visible system capabilities.
+pub async fn list_routing_capabilities(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let workflows = state.kernel.workflows.list_workflows().await;
+    let router_agent_id = state
+        .kernel
+        .registry
+        .find_by_name("orchestrator")
+        .filter(|entry| entry.manifest.module == "builtin:router")
+        .map(|entry| entry.id)
+        .unwrap_or_default();
+    let capabilities = state
+        .kernel
+        .list_routing_capabilities(router_agent_id, &workflows);
+
+    Json(serde_json::json!({
+        "capabilities": capabilities,
+        "total": capabilities.len(),
+    }))
+}
+
+/// POST /api/routing/proposals — Analyze whether a goal needs a new capability draft.
+pub async fn create_routing_proposal(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CapabilityProposalRequest>,
+) -> impl IntoResponse {
+    let workflows = state.kernel.workflows.list_workflows().await;
+    let router_agent_id = state
+        .kernel
+        .registry
+        .find_by_name("orchestrator")
+        .filter(|entry| entry.manifest.module == "builtin:router")
+        .map(|entry| entry.id)
+        .unwrap_or_default();
+    let analysis = state
+        .kernel
+        .analyze_capability_gap(router_agent_id, &workflows, &req.message);
+
+    Json(serde_json::json!(analysis))
+}
+
+/// POST /api/routing/proposals/apply — Submit a proposal for approval-backed creation.
+pub async fn apply_routing_proposal(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ApplyCapabilityProposalRequest>,
+) -> impl IntoResponse {
+    match state
+        .kernel
+        .submit_capability_proposal(req.proposal, req.activate_after_create)
+    {
+        Ok(job) => {
+            for _ in 0..10 {
+                if state
+                    .kernel
+                    .approval_manager
+                    .list_pending()
+                    .iter()
+                    .any(|approval| approval.id == job.approval_id)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "job_id": job.job_id.to_string(),
+                    "approval_id": job.approval_id.to_string(),
+                    "status": job.status,
+                })),
+            )
+        }
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": error })),
+        ),
+    }
+}
+
+/// GET /api/routing/proposals/jobs — List proposal apply jobs.
+pub async fn list_routing_proposal_jobs(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let jobs = state.kernel.list_capability_proposal_jobs();
+    Json(serde_json::json!({
+        "jobs": jobs,
+        "total": jobs.len(),
+    }))
+}
+
+/// GET /api/routing/proposals/jobs/{id} — Fetch a proposal apply job.
+pub async fn get_routing_proposal_job(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let job_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid job ID"})),
+            );
+        }
+    };
+
+    match state.kernel.get_capability_proposal_job(job_id) {
+        Some(job) => (StatusCode::OK, Json(serde_json::json!(job))),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Job not found"})),
+        ),
+    }
+}
+
 /// Resolve uploaded file attachments into ContentBlock::Image blocks.
 ///
 /// Reads each file from the upload directory, base64-encodes it, and
@@ -286,6 +399,93 @@ pub fn resolve_attachments(
     }
 
     blocks
+}
+
+#[derive(Debug)]
+struct UploadedAttachmentPayload {
+    filename: String,
+    content_type: String,
+    data: Vec<u8>,
+}
+
+fn load_uploaded_attachments(
+    attachments: &[openfang_types::comms::CommsAttachmentRef],
+) -> Result<Vec<UploadedAttachmentPayload>, String> {
+    let upload_dir = std::env::temp_dir().join("openfang_uploads");
+    let mut files = Vec::new();
+
+    for att in attachments {
+        if uuid::Uuid::parse_str(&att.file_id).is_err() {
+            return Err(format!("Invalid attachment file_id: {}", att.file_id));
+        }
+
+        let meta = UPLOAD_REGISTRY.get(&att.file_id);
+        let filename = meta
+            .as_ref()
+            .map(|m| m.filename.clone())
+            .filter(|s| !s.is_empty())
+            .or_else(|| (!att.filename.is_empty()).then(|| att.filename.clone()))
+            .unwrap_or_else(|| "attachment".to_string());
+        let content_type = meta
+            .as_ref()
+            .map(|m| m.content_type.clone())
+            .filter(|s| !s.is_empty())
+            .or_else(|| (!att.content_type.is_empty()).then(|| att.content_type.clone()))
+            .unwrap_or_else(|| "application/octet-stream".to_string());
+
+        let file_path = upload_dir.join(&att.file_id);
+        let data = std::fs::read(&file_path)
+            .map_err(|e| format!("Failed to read attachment '{}': {e}", att.file_id))?;
+
+        files.push(UploadedAttachmentPayload {
+            filename,
+            content_type,
+            data,
+        });
+    }
+
+    Ok(files)
+}
+
+fn comms_attachment_refs(
+    attachments: &[openfang_types::comms::CommsAttachmentRef],
+) -> Vec<AttachmentRef> {
+    attachments
+        .iter()
+        .map(|att| AttachmentRef {
+            file_id: att.file_id.clone(),
+            filename: att.filename.clone(),
+            content_type: att.content_type.clone(),
+        })
+        .collect()
+}
+
+fn resolve_agent_delivery_attachments(
+    attachments: &[openfang_types::comms::CommsAttachmentRef],
+) -> Result<Vec<openfang_types::message::ContentBlock>, String> {
+    let refs = comms_attachment_refs(attachments);
+    for (att, resolved) in attachments.iter().zip(refs.iter()) {
+        let content_type = UPLOAD_REGISTRY
+            .get(&att.file_id)
+            .map(|meta| meta.content_type.clone())
+            .filter(|value| !value.is_empty())
+            .or_else(|| (!resolved.content_type.is_empty()).then(|| resolved.content_type.clone()))
+            .unwrap_or_default();
+        if !content_type.starts_with("image/") {
+            return Err(format!(
+                "Agent delivery currently supports image attachments only: {}",
+                att.file_id
+            ));
+        }
+    }
+
+    let image_blocks = resolve_attachments(&refs);
+    if image_blocks.len() != attachments.len() {
+        return Err(
+            "One or more image attachments could not be resolved for agent delivery".to_string(),
+        );
+    }
+    Ok(image_blocks)
 }
 
 /// Pre-insert image attachments into an agent's session so the LLM can see them.
@@ -759,6 +959,107 @@ pub async fn shutdown(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Signal the HTTP server to initiate graceful shutdown so the process exits.
     state.shutdown_notify.notify_one();
     Json(serde_json::json!({"status": "shutting_down"}))
+}
+
+/// POST /api/backup — Create a backup archive of persisted kernel state.
+pub async fn create_backup(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.kernel.create_backup() {
+        Ok(response) => (StatusCode::OK, Json(serde_json::json!(response))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to create backup: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/backups — List available backup archives.
+pub async fn list_backups(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.kernel.list_backups() {
+        Ok(response) => Json(serde_json::json!(response)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to list backups: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
+/// DELETE /api/backups/{filename} — Delete a backup archive.
+pub async fn delete_backup(
+    State(state): State<Arc<AppState>>,
+    Path(filename): Path<String>,
+) -> impl IntoResponse {
+    match state.kernel.delete_backup(&filename) {
+        Ok(response) => (StatusCode::OK, Json(serde_json::json!(response))).into_response(),
+        Err(openfang_kernel::error::KernelError::OpenFang(
+            openfang_types::error::OpenFangError::InvalidInput(message),
+        )) if message == "Backup not found" => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": message})),
+        )
+            .into_response(),
+        Err(openfang_kernel::error::KernelError::OpenFang(
+            openfang_types::error::OpenFangError::InvalidInput(message),
+        )) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": message})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to delete backup: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /api/restore — Restore persisted kernel state from a backup archive.
+pub async fn restore_backup(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RestoreBackupRequest>,
+) -> impl IntoResponse {
+    match state.kernel.restore_backup(req) {
+        Ok(response) if response.errors.is_empty() => {
+            (StatusCode::OK, Json(serde_json::json!(response))).into_response()
+        }
+        Ok(response) => {
+            let error_count = response.errors.len();
+            let mut body = serde_json::to_value(&response).unwrap_or_default();
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert(
+                    "error".to_string(),
+                    serde_json::Value::String(format!(
+                        "Restore completed with {error_count} file error(s)"
+                    )),
+                );
+            }
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
+        }
+        Err(openfang_kernel::error::KernelError::OpenFang(
+            openfang_types::error::OpenFangError::InvalidInput(message),
+        )) => (
+            if message == "Backup file not found" {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::BAD_REQUEST
+            },
+            Json(serde_json::json!({"error": message})),
+        )
+            .into_response(),
+        Err(openfang_kernel::error::KernelError::OpenFang(
+            openfang_types::error::OpenFangError::Serialization(message),
+        )) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": message})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to restore backup: {e}")})),
+        )
+            .into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1252,6 +1553,34 @@ pub async fn list_profiles() -> impl IntoResponse {
         .collect();
 
     Json(result)
+}
+
+/// GET /api/profiles/{name} — Get a single tool profile by name.
+pub async fn get_profile(Path(name): Path<String>) -> impl IntoResponse {
+    use openfang_types::agent::ToolProfile;
+
+    let profiles: &[(&str, ToolProfile)] = &[
+        ("minimal", ToolProfile::Minimal),
+        ("coding", ToolProfile::Coding),
+        ("research", ToolProfile::Research),
+        ("messaging", ToolProfile::Messaging),
+        ("automation", ToolProfile::Automation),
+        ("full", ToolProfile::Full),
+    ];
+
+    match profiles.iter().find(|(n, _)| *n == name) {
+        Some((n, profile)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "name": n,
+                "tools": profile.tools(),
+            })),
+        ),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("Profile '{}' not found", name)})),
+        ),
+    }
 }
 
 /// PUT /api/agents/:id/mode — Change an agent's operational mode.
@@ -4358,8 +4687,7 @@ pub async fn install_hand(
 
     match state
         .kernel
-        .hand_registry
-        .install_from_content(toml_content, skill_content)
+        .install_hand_definition(toml_content, skill_content)
     {
         Ok(def) => (
             StatusCode::OK,
@@ -4398,8 +4726,7 @@ pub async fn upsert_hand(
 
     match state
         .kernel
-        .hand_registry
-        .upsert_from_content(toml_content, skill_content)
+        .upsert_hand_definition(toml_content, skill_content)
     {
         Ok(def) => (
             StatusCode::OK,
@@ -4781,35 +5108,19 @@ pub async fn hand_instance_browser(
 
 /// GET /api/mcp/servers — List configured MCP servers and their tools.
 pub async fn list_mcp_servers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    // Get configured servers from config
-    let config_servers: Vec<serde_json::Value> = state
-        .kernel
-        .config
-        .mcp_servers
+    let manual_servers = match load_manual_mcp_server_configs(&state) {
+        Ok(servers) => servers,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to load MCP config: {e}")})),
+            )
+                .into_response();
+        }
+    };
+    let config_servers: Vec<serde_json::Value> = manual_servers
         .iter()
-        .map(|s| {
-            let transport = match &s.transport {
-                openfang_types::config::McpTransportEntry::Stdio { command, args } => {
-                    serde_json::json!({
-                        "type": "stdio",
-                        "command": command,
-                        "args": args,
-                    })
-                }
-                openfang_types::config::McpTransportEntry::Sse { url } => {
-                    serde_json::json!({
-                        "type": "sse",
-                        "url": url,
-                    })
-                }
-            };
-            serde_json::json!({
-                "name": s.name,
-                "transport": transport,
-                "timeout_secs": s.timeout_secs,
-                "env": s.env,
-            })
-        })
+        .map(mcp_server_config_to_json)
         .collect();
 
     // Get connected servers and their tools from the live MCP connections
@@ -4842,6 +5153,360 @@ pub async fn list_mcp_servers(State(state): State<Arc<AppState>>) -> impl IntoRe
         "total_configured": config_servers.len(),
         "total_connected": connected.len(),
     }))
+    .into_response()
+}
+
+/// POST /api/mcp/servers — Add a new MCP server configuration.
+pub async fn add_mcp_server(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let name = match body.get("name").and_then(|v| v.as_str()) {
+        Some(n) if !n.trim().is_empty() => n.trim().to_string(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing or empty 'name' field"})),
+            )
+                .into_response();
+        }
+    };
+
+    if body.get("transport").is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Missing 'transport' field"})),
+        )
+            .into_response();
+    }
+
+    let entry: openfang_types::config::McpServerConfigEntry = match serde_json::from_value(body) {
+        Ok(entry) => entry,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid MCP server config: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    let existing = match load_manual_mcp_server_configs(&state) {
+        Ok(servers) => servers,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to load MCP config: {e}")})),
+            )
+                .into_response();
+        }
+    };
+    if existing.iter().any(|server| server.name == name) {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": format!("MCP server '{}' already exists", name)})),
+        )
+            .into_response();
+    }
+
+    let config_path = state.kernel.config_path().to_path_buf();
+    if let Err(e) = upsert_mcp_server_config(&config_path, &entry) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to write config: {e}")})),
+        )
+            .into_response();
+    }
+
+    let connected = match state.kernel.reload_mcp_servers_from_disk().await {
+        Ok(connected) => connected,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "status": "saved_reload_failed",
+                    "name": name,
+                    "error": e,
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    state.kernel.audit_log.record(
+        "system",
+        openfang_runtime::audit::AuditAction::ConfigChange,
+        format!("mcp_server added: {name}"),
+        "completed",
+    );
+
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "status": "added",
+            "name": name,
+            "reload": "applied",
+            "connected_servers": connected,
+        })),
+    )
+        .into_response()
+}
+
+/// PUT /api/mcp/servers/{name} — Update an existing MCP server configuration.
+pub async fn update_mcp_server(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(mut body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let existing = match load_manual_mcp_server_configs(&state) {
+        Ok(servers) => servers,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to load MCP config: {e}")})),
+            )
+                .into_response();
+        }
+    };
+    if !existing.iter().any(|server| server.name == name) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("MCP server '{}' not found", name)})),
+        )
+            .into_response();
+    }
+
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("name".to_string(), serde_json::json!(name.clone()));
+    }
+    if body.get("transport").is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Missing 'transport' field"})),
+        )
+            .into_response();
+    }
+
+    let entry: openfang_types::config::McpServerConfigEntry = match serde_json::from_value(body) {
+        Ok(entry) => entry,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid MCP server config: {e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    let config_path = state.kernel.config_path().to_path_buf();
+    if let Err(e) = upsert_mcp_server_config(&config_path, &entry) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to write config: {e}")})),
+        )
+            .into_response();
+    }
+
+    let connected = match state.kernel.reload_mcp_servers_from_disk().await {
+        Ok(connected) => connected,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "status": "saved_reload_failed",
+                    "name": name,
+                    "error": e,
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    state.kernel.audit_log.record(
+        "system",
+        openfang_runtime::audit::AuditAction::ConfigChange,
+        format!("mcp_server updated: {name}"),
+        "completed",
+    );
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "updated",
+            "name": name,
+            "reload": "applied",
+            "connected_servers": connected,
+        })),
+    )
+        .into_response()
+}
+
+/// DELETE /api/mcp/servers/{name} — Remove an MCP server configuration.
+pub async fn delete_mcp_server(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    let existing = match load_manual_mcp_server_configs(&state) {
+        Ok(servers) => servers,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to load MCP config: {e}")})),
+            )
+                .into_response();
+        }
+    };
+    if !existing.iter().any(|server| server.name == name) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("MCP server '{}' not found", name)})),
+        )
+            .into_response();
+    }
+
+    let config_path = state.kernel.config_path().to_path_buf();
+    if let Err(e) = remove_mcp_server_config(&config_path, &name) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Failed to write config: {e}")})),
+        )
+            .into_response();
+    }
+
+    let connected = match state.kernel.reload_mcp_servers_from_disk().await {
+        Ok(connected) => connected,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "status": "saved_reload_failed",
+                    "name": name,
+                    "error": e,
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    state.kernel.audit_log.record(
+        "system",
+        openfang_runtime::audit::AuditAction::ConfigChange,
+        format!("mcp_server removed: {name}"),
+        "completed",
+    );
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "removed",
+            "name": name,
+            "reload": "applied",
+            "connected_servers": connected,
+        })),
+    )
+        .into_response()
+}
+
+fn load_manual_mcp_server_configs(
+    state: &Arc<AppState>,
+) -> Result<Vec<openfang_types::config::McpServerConfigEntry>, String> {
+    let config_path = state.kernel.config_path().to_path_buf();
+    if !config_path.exists() {
+        return Ok(state.kernel.config.mcp_servers.clone());
+    }
+
+    Ok(openfang_kernel::config::load_config(Some(&config_path)).mcp_servers)
+}
+
+fn mcp_server_config_to_json(
+    server: &openfang_types::config::McpServerConfigEntry,
+) -> serde_json::Value {
+    let transport = match &server.transport {
+        openfang_types::config::McpTransportEntry::Stdio { command, args } => {
+            serde_json::json!({
+                "type": "stdio",
+                "command": command,
+                "args": args,
+            })
+        }
+        openfang_types::config::McpTransportEntry::Sse { url } => {
+            serde_json::json!({
+                "type": "sse",
+                "url": url,
+            })
+        }
+    };
+
+    serde_json::json!({
+        "name": server.name,
+        "transport": transport,
+        "timeout_secs": server.timeout_secs,
+        "env": server.env,
+    })
+}
+
+/// Upsert an MCP server entry in config.toml's `[[mcp_servers]]` array.
+fn upsert_mcp_server_config(
+    config_path: &std::path::Path,
+    entry: &openfang_types::config::McpServerConfigEntry,
+) -> Result<(), String> {
+    let mut table: toml::value::Table = if config_path.exists() {
+        let content = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
+        toml::from_str(&content).unwrap_or_default()
+    } else {
+        toml::value::Table::new()
+    };
+
+    let entry_json = serde_json::to_value(entry).map_err(|e| e.to_string())?;
+    let entry_toml = json_to_toml_value(&entry_json);
+
+    let servers = table
+        .entry("mcp_servers".to_string())
+        .or_insert_with(|| toml::Value::Array(Vec::new()));
+    if let toml::Value::Array(ref mut arr) = servers {
+        arr.retain(|value| {
+            value
+                .as_table()
+                .and_then(|t| t.get("name"))
+                .and_then(|n| n.as_str())
+                .map(|existing_name| existing_name != entry.name)
+                .unwrap_or(true)
+        });
+        arr.push(entry_toml);
+    }
+
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let toml_string = toml::to_string_pretty(&table).map_err(|e| e.to_string())?;
+    std::fs::write(config_path, toml_string).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Remove an MCP server entry from config.toml's `[[mcp_servers]]` array by name.
+fn remove_mcp_server_config(config_path: &std::path::Path, name: &str) -> Result<(), String> {
+    let mut table: toml::value::Table = if config_path.exists() {
+        let content = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
+        toml::from_str(&content).unwrap_or_default()
+    } else {
+        return Ok(());
+    };
+
+    if let Some(toml::Value::Array(ref mut arr)) = table.get_mut("mcp_servers") {
+        arr.retain(|value| {
+            value
+                .as_table()
+                .and_then(|t| t.get("name"))
+                .and_then(|n| n.as_str())
+                .map(|existing_name| existing_name != name)
+                .unwrap_or(true)
+        });
+    }
+
+    let toml_string = toml::to_string_pretty(&table).map_err(|e| e.to_string())?;
+    std::fs::write(config_path, toml_string).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -5115,6 +5780,43 @@ pub async fn list_tools(State(state): State<Arc<AppState>>) -> impl IntoResponse
     Json(serde_json::json!({"tools": tools, "total": tools.len()}))
 }
 
+/// GET /api/tools/{name} — Get a single tool definition by name.
+pub async fn get_tool(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    if let Some(tool) = builtin_tool_definitions().iter().find(|t| t.name == name) {
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.input_schema,
+                "source": "builtin",
+            })),
+        );
+    }
+
+    if let Ok(mcp_tools) = state.kernel.mcp_tools.lock() {
+        if let Some(tool) = mcp_tools.iter().find(|t| t.name == name) {
+            return (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.input_schema,
+                    "source": "mcp",
+                })),
+            );
+        }
+    }
+
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({"error": format!("Tool '{}' not found", name)})),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Config endpoint
 // ---------------------------------------------------------------------------
@@ -5151,10 +5853,18 @@ pub async fn usage_stats(State(state): State<Arc<AppState>>) -> impl IntoRespons
         .iter()
         .map(|e| {
             let (tokens, tool_calls) = state.kernel.scheduler.get_usage(e.id).unwrap_or((0, 0));
+            let cost_usd = state
+                .kernel
+                .memory
+                .usage()
+                .query_summary(Some(e.id))
+                .map(|summary| summary.total_cost_usd)
+                .unwrap_or(0.0);
             serde_json::json!({
                 "agent_id": e.id.to_string(),
                 "name": e.name,
                 "total_tokens": tokens,
+                "cost_usd": cost_usd,
                 "tool_calls": tool_calls,
             })
         })
@@ -6505,6 +7215,47 @@ pub async fn a2a_list_external_agents(State(state): State<Arc<AppState>>) -> imp
     Json(serde_json::json!({"agents": items, "total": items.len()}))
 }
 
+/// GET /api/a2a/agents/{id} — Get a specific external A2A agent by index, URL, or name.
+pub async fn a2a_get_external_agent(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let agents = state
+        .kernel
+        .a2a_external_agents
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+
+    let make_response = |(_, card): &(String, openfang_runtime::a2a::AgentCard)| {
+        serde_json::json!({
+            "name": card.name,
+            "url": card.url,
+            "description": card.description,
+            "skills": card.skills,
+            "version": card.version,
+        })
+    };
+
+    if let Ok(idx) = id.parse::<usize>() {
+        if let Some(entry) = agents.get(idx) {
+            return (StatusCode::OK, Json(make_response(entry)));
+        }
+    }
+
+    if let Some(entry) = agents.iter().find(|(_, card)| card.url == id) {
+        return (StatusCode::OK, Json(make_response(entry)));
+    }
+
+    if let Some(entry) = agents.iter().find(|(_, card)| card.name == id) {
+        return (StatusCode::OK, Json(make_response(entry)));
+    }
+
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({"error": format!("A2A agent '{}' not found", id)})),
+    )
+}
+
 /// POST /api/a2a/discover — Discover a new external A2A agent by URL.
 pub async fn a2a_discover_external(
     State(state): State<Arc<AppState>>,
@@ -7175,9 +7926,18 @@ pub async fn get_agent_mcp_servers(
     // Collect known MCP server names from connected tools
     let mut available: Vec<String> = Vec::new();
     if let Ok(mcp_tools) = state.kernel.mcp_tools.lock() {
+        let configured_servers: Vec<String> = state
+            .kernel
+            .effective_mcp_servers
+            .read()
+            .map(|servers| servers.iter().map(|s| s.name.clone()).collect())
+            .unwrap_or_default();
+        let configured_refs: Vec<&str> = configured_servers.iter().map(String::as_str).collect();
         let mut seen = std::collections::HashSet::new();
         for tool in mcp_tools.iter() {
-            if let Some(server) = openfang_runtime::mcp::extract_mcp_server(&tool.name) {
+            if let Some(server) =
+                openfang_runtime::mcp::extract_mcp_server_from_known(&tool.name, &configured_refs)
+            {
                 if seen.insert(server.to_string()) {
                     available.push(server.to_string());
                 }
@@ -9659,6 +10419,21 @@ pub async fn config_reload(State(state): State<Arc<AppState>>) -> impl IntoRespo
     );
     match state.kernel.reload_config() {
         Ok(plan) => {
+            if plan
+                .hot_actions
+                .contains(&openfang_kernel::config_reload::HotAction::ReloadMcpServers)
+            {
+                if let Err(e) = state.kernel.reload_mcp_servers_from_disk().await {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({
+                            "status": "error",
+                            "error": format!("MCP reload failed: {e}"),
+                        })),
+                    );
+                }
+            }
+
             let status = if plan.restart_required {
                 "partial"
             } else if plan.has_changes() {
@@ -9929,7 +10704,15 @@ fn json_to_toml_value(value: &serde_json::Value) -> toml::Value {
             }
         }
         serde_json::Value::Bool(b) => toml::Value::Boolean(*b),
-        _ => toml::Value::String(value.to_string()),
+        serde_json::Value::Array(values) => {
+            toml::Value::Array(values.iter().map(json_to_toml_value).collect())
+        }
+        serde_json::Value::Object(map) => toml::Value::Table(
+            map.iter()
+                .map(|(k, v)| (k.clone(), json_to_toml_value(v)))
+                .collect(),
+        ),
+        serde_json::Value::Null => toml::Value::String("null".to_string()),
     }
 }
 
@@ -10048,6 +10831,48 @@ pub async fn delete_cron_job(
                 }
                 Err(e) => (
                     StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({"error": format!("{e}")})),
+                ),
+            }
+        }
+        Err(_) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Invalid job ID"})),
+        ),
+    }
+}
+
+/// PUT /api/cron/jobs/{id} — Update a cron job's configuration.
+pub async fn update_cron_job(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    match uuid::Uuid::parse_str(&id) {
+        Ok(uuid) => {
+            let job_id = openfang_types::scheduler::CronJobId(uuid);
+            match state.kernel.cron_scheduler.update_job(job_id, &body) {
+                Ok(job) => {
+                    let _ = state.kernel.cron_scheduler.persist();
+                    (
+                        StatusCode::OK,
+                        Json(serde_json::to_value(&job).unwrap_or_default()),
+                    )
+                }
+                Err(openfang_types::error::OpenFangError::InvalidInput(msg)) => (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": msg})),
+                ),
+                Err(openfang_types::error::OpenFangError::Internal(msg))
+                    if msg.contains("not found") =>
+                {
+                    (
+                        StatusCode::NOT_FOUND,
+                        Json(serde_json::json!({"error": msg})),
+                    )
+                }
+                Err(e) => (
+                    StatusCode::BAD_REQUEST,
                     Json(serde_json::json!({"error": format!("{e}")})),
                 ),
             }
@@ -10994,6 +11819,38 @@ pub async fn comms_send(
     State(state): State<Arc<AppState>>,
     Json(req): Json<openfang_types::comms::CommsSendRequest>,
 ) -> impl IntoResponse {
+    let has_agent_target = req
+        .to_agent_id
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+    let has_channel_target = req
+        .channel
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+
+    if has_agent_target == has_channel_target {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Provide exactly one delivery target: either to_agent_id or channel"
+            })),
+        );
+    }
+
+    if req.message.len() > 64 * 1024 {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(serde_json::json!({"error": "Message too large (max 64KB)"})),
+        );
+    }
+
+    if req.message.trim().is_empty() && req.attachments.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Message or attachments are required"})),
+        );
+    }
+
     // Validate from agent exists
     let from_id: openfang_types::agent::AgentId = match req.from_agent_id.parse() {
         Ok(id) => id,
@@ -11011,46 +11868,156 @@ pub async fn comms_send(
         );
     }
 
-    // Validate to agent exists
-    let to_id: openfang_types::agent::AgentId = match req.to_agent_id.parse() {
-        Ok(id) => id,
-        Err(_) => {
+    if has_agent_target {
+        let to_id: openfang_types::agent::AgentId =
+            match req.to_agent_id.as_deref().unwrap().parse() {
+                Ok(id) => id,
+                Err(_) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({"error": "Invalid to_agent_id"})),
+                    )
+                }
+            };
+        if state.kernel.registry.get(to_id).is_none() {
             return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "Invalid to_agent_id"})),
-            )
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Target agent not found"})),
+            );
+        }
+
+        let image_blocks = if req.attachments.is_empty() {
+            Vec::new()
+        } else {
+            match resolve_agent_delivery_attachments(&req.attachments) {
+                Ok(blocks) => blocks,
+                Err(error) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({ "error": error })),
+                    );
+                }
+            }
+        };
+
+        let attachments_received = image_blocks.len();
+        if !image_blocks.is_empty() {
+            inject_attachments_into_session(&state.kernel, to_id, image_blocks);
+        }
+
+        return match state.kernel.send_message(to_id, &req.message).await {
+            Ok(result) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "ok": true,
+                    "mode": "agent",
+                    "response": result.response,
+                    "input_tokens": result.total_usage.input_tokens,
+                    "output_tokens": result.total_usage.output_tokens,
+                    "attachments_received": attachments_received,
+                })),
+            ),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Message delivery failed: {e}")})),
+            ),
+        };
+    }
+
+    let channel = req.channel.as_deref().unwrap().trim().to_lowercase();
+    let recipient = if let Some(recipient) = req
+        .recipient
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        recipient.to_string()
+    } else {
+        match state.kernel.get_channel_default_recipient(&channel).await {
+            Some(default_recipient) => default_recipient,
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "recipient is required when the channel has no configured default recipient"
+                    })),
+                );
+            }
         }
     };
-    if state.kernel.registry.get(to_id).is_none() {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "Target agent not found"})),
-        );
+    let thread_id = req
+        .thread_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+
+    let attachments = match load_uploaded_attachments(&req.attachments) {
+        Ok(files) => files,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": error })),
+            );
+        }
+    };
+
+    let mut results = Vec::new();
+
+    if !req.message.trim().is_empty() {
+        match state
+            .kernel
+            .send_channel_message(&channel, &recipient, &req.message, thread_id)
+            .await
+        {
+            Ok(result) => results.push(result),
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(
+                        serde_json::json!({"error": format!("Channel message delivery failed: {error}")}),
+                    ),
+                );
+            }
+        }
     }
 
-    // SECURITY: Limit message size
-    if req.message.len() > 64 * 1024 {
-        return (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Json(serde_json::json!({"error": "Message too large (max 64KB)"})),
-        );
+    for attachment in attachments {
+        match state
+            .kernel
+            .send_channel_file_data(
+                &channel,
+                &recipient,
+                attachment.data,
+                &attachment.filename,
+                &attachment.content_type,
+                thread_id,
+            )
+            .await
+        {
+            Ok(result) => results.push(result),
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(
+                        serde_json::json!({"error": format!("Channel attachment delivery failed: {error}")}),
+                    ),
+                );
+            }
+        }
     }
 
-    match state.kernel.send_message(to_id, &req.message).await {
-        Ok(result) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "ok": true,
-                "response": result.response,
-                "input_tokens": result.total_usage.input_tokens,
-                "output_tokens": result.total_usage.output_tokens,
-            })),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Message delivery failed: {e}")})),
-        ),
-    }
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "ok": true,
+            "mode": "channel",
+            "channel": channel,
+            "recipient": recipient,
+            "thread_id": thread_id,
+            "message_sent": !req.message.trim().is_empty(),
+            "attachments_sent": req.attachments.len(),
+            "results": results,
+        })),
+    )
 }
 
 /// POST /api/comms/task — Post a task to the agent task queue.

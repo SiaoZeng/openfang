@@ -1,0 +1,27 @@
+id = "chrome-devtools"
+name = "Chrome DevTools"
+description = "Automate and debug Chrome through the official Chrome DevTools MCP server"
+category = "devtools"
+icon = "🌐"
+tags = ["browser", "chrome", "devtools", "automation", "debugging", "qa", "web"]
+
+[transport]
+type = "stdio"
+command = "npx"
+args = ["-y", "chrome-devtools-mcp@latest"]
+
+[health_check]
+interval_secs = 60
+unhealthy_threshold = 3
+
+setup_instructions = """
+1. Install Google Chrome or Chromium on the machine where OpenFang runs.
+2. Ensure Node.js 18+ and `npx` are available on PATH.
+3. Install or allow the official Chrome DevTools MCP server package when prompted by `npx`.
+4. Add this integration in OpenFang, then verify `/api/mcp/servers` shows `chrome-devtools` as connected.
+5. Use Browser Hand or any MCP-enabled agent to drive tabs, inspect pages, and capture snapshots/screenshots.
+
+Notes:
+- The server can launch a managed Chrome instance automatically.
+- For remote debugging against an already-running browser, use manual MCP server configuration instead of the bundled integration if you need custom flags.
+"""

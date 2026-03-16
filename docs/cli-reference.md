@@ -68,7 +68,7 @@ Launch the interactive TUI dashboard.
 openfang [--config <PATH>]
 ```
 
-The TUI provides a full-screen terminal interface with panels for agents, chat, workflows, channels, skills, settings, and more. Tracing output is redirected to `~/.openfang/tui.log` to avoid corrupting the terminal display.
+The TUI provides a full-screen terminal interface with panels for agents, chat, workflows, the capability builder, channels, skills, settings, and more. Tracing output is redirected to `~/.openfang/tui.log` to avoid corrupting the terminal display.
 
 Press `Ctrl+C` to exit. A second `Ctrl+C` force-exits the process.
 
@@ -482,6 +482,94 @@ openfang workflow run <WORKFLOW_ID> <INPUT>
 ```bash
 openfang workflow run abc123 "Analyze this code for security issues"
 ```
+
+---
+
+## Builder Commands
+
+All builder commands require a running daemon.
+
+### openfang builder analyze
+
+Analyze a durable goal and report whether an existing capability is sufficient or whether OpenFang should draft a new one.
+
+```
+openfang builder analyze <GOAL> [--json]
+```
+
+**Arguments:**
+
+| Argument | Description |
+|---|---|
+| `<GOAL>` | Durable or repeatable goal to evaluate against the routing capability registry. |
+
+**Options:**
+
+| Option | Description |
+|---|---|
+| `--json` | Output the full gap analysis and proposal draft as JSON. |
+
+**Examples:**
+
+```bash
+openfang builder analyze "automate contract renewal approval escalation weekly"
+openfang builder analyze "monitor competitor pricing daily and notify me" --json
+```
+
+### openfang builder submit
+
+Analyze a goal and, if a gap exists, submit the resulting proposal for approval-backed creation.
+
+```
+openfang builder submit <GOAL> [--activate] [--json]
+```
+
+**Options:**
+
+| Option | Description |
+|---|---|
+| `--activate` | Activate the created capability immediately when supported. Ignored for workflow proposals. |
+| `--json` | Output the raw submit response. |
+
+**Behavior:**
+
+- runs the same analysis as `openfang builder analyze`
+- stops early if no capability gap is detected
+- creates a builder job plus a normal approval request when a proposal exists
+- prints both `job_id` and `approval_id`
+
+**Example:**
+
+```bash
+openfang builder submit "automate contract renewal approval escalation weekly"
+openfang approvals approve <APPROVAL_ID>
+openfang builder job <JOB_ID>
+```
+
+### openfang builder jobs
+
+List capability-builder apply jobs.
+
+```
+openfang builder jobs [--json]
+```
+
+### openfang builder job
+
+Inspect a single capability-builder apply job.
+
+```
+openfang builder job <JOB_ID> [--json]
+```
+
+**Job statuses:**
+
+- `pending_approval`
+- `applying`
+- `applied`
+- `rejected`
+- `timed_out`
+- `failed`
 
 ---
 
@@ -1103,7 +1191,7 @@ The CLI uses a two-step mechanism to detect a running daemon:
 
 2. **Health check:** The CLI sends `GET http://<listen_addr>/api/health` with a 2-second timeout. If the health check succeeds, the daemon is considered running and the CLI uses HTTP to communicate with it.
 
-If either step fails (no `daemon.json`, stale file, health check timeout), the CLI falls back to in-process mode for commands that support it. Commands that require a daemon (workflows, triggers, channel test/enable/disable, dashboard) will exit with an error and a helpful message.
+If either step fails (no `daemon.json`, stale file, health check timeout), the CLI falls back to in-process mode for commands that support it. Commands that require a daemon (workflows, builder, triggers, channel test/enable/disable, dashboard) will exit with an error and a helpful message.
 
 **Daemon lifecycle:**
 
@@ -1206,6 +1294,14 @@ openfang workflow list
 
 # Run a workflow
 openfang workflow run <WORKFLOW_ID> "Review the latest PR"
+
+# Analyze a capability gap
+openfang builder analyze "automate contract renewal approval escalation weekly"
+
+# Submit a proposal and then approve it
+openfang builder submit "automate contract renewal approval escalation weekly"
+openfang approvals approve <APPROVAL_ID>
+openfang builder job <JOB_ID>
 ```
 
 ### Event triggers

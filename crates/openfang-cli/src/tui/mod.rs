@@ -12,8 +12,9 @@ use openfang_kernel::OpenFangKernel;
 use openfang_runtime::llm_driver::StreamEvent;
 use openfang_types::agent::AgentId;
 use screens::{
-    agents, audit, channels, chat, comms, dashboard, extensions, hands, logs, memory, peers,
-    security, sessions, settings, skills, templates, triggers, usage, welcome, wizard, workflows,
+    agents, audit, builder, channels, chat, comms, dashboard, extensions, hands, logs, memory,
+    peers, security, sessions, settings, skills, templates, triggers, usage, welcome, wizard,
+    workflows,
 };
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
@@ -45,6 +46,7 @@ enum Tab {
     Chat,
     Sessions,
     Workflows,
+    Builder,
     Triggers,
     Memory,
     Channels,
@@ -67,6 +69,7 @@ const TABS: &[Tab] = &[
     Tab::Chat,
     Tab::Sessions,
     Tab::Workflows,
+    Tab::Builder,
     Tab::Triggers,
     Tab::Memory,
     Tab::Channels,
@@ -91,6 +94,7 @@ impl Tab {
             Tab::Chat => "Chat",
             Tab::Sessions => "Sessions",
             Tab::Workflows => "Workflows",
+            Tab::Builder => "Builder",
             Tab::Triggers => "Triggers",
             Tab::Memory => "Memory",
             Tab::Channels => "Channels",
@@ -160,6 +164,7 @@ struct App {
     dashboard: dashboard::DashboardState,
     channels: channels::ChannelState,
     workflows: workflows::WorkflowState,
+    builder: builder::BuilderState,
     triggers: triggers::TriggerState,
     sessions: sessions::SessionsState,
     memory: memory::MemoryState,
@@ -199,6 +204,7 @@ impl App {
             dashboard: dashboard::DashboardState::new(),
             channels: channels::ChannelState::new(),
             workflows: workflows::WorkflowState::new(),
+            builder: builder::BuilderState::new(),
             triggers: triggers::TriggerState::new(),
             sessions: sessions::SessionsState::new(),
             memory: memory::MemoryState::new(),
@@ -287,6 +293,79 @@ impl App {
                 self.workflows.status_msg = "Workflow created!".to_string();
                 self.refresh_workflows();
             }
+            AppEvent::BuilderJobsLoaded(list) => {
+                let previously_selected_job_id = self
+                    .builder
+                    .list_state
+                    .selected()
+                    .and_then(|index| self.builder.jobs.get(index))
+                    .map(|job| job.job_id.clone());
+                self.builder.jobs = list;
+                let next_selection = previously_selected_job_id
+                    .as_ref()
+                    .and_then(|job_id| {
+                        self.builder
+                            .jobs
+                            .iter()
+                            .position(|job| &job.job_id == job_id)
+                    })
+                    .or_else(|| (!self.builder.jobs.is_empty()).then_some(0));
+                self.builder.list_state.select(next_selection);
+                if let Some(current_job_id) = self
+                    .builder
+                    .current_job
+                    .as_ref()
+                    .map(|job| job.job_id.clone())
+                {
+                    self.builder.current_job = self
+                        .builder
+                        .jobs
+                        .iter()
+                        .find(|job| job.job_id == current_job_id)
+                        .cloned();
+                }
+                self.builder.loading = false;
+            }
+            AppEvent::BuilderAnalysisLoaded(analysis) => {
+                self.builder.analysis = Some(analysis);
+                self.builder.loading = false;
+                if self
+                    .builder
+                    .analysis
+                    .as_ref()
+                    .map(|analysis| analysis.gap_detected && analysis.proposal_json.is_some())
+                    .unwrap_or(false)
+                {
+                    self.builder.sub = builder::BuilderSubScreen::Proposal;
+                    self.builder.status_msg = "Proposal draft ready.".to_string();
+                } else {
+                    self.builder.sub = builder::BuilderSubScreen::List;
+                    self.builder.status_msg = "No new capability needed.".to_string();
+                }
+            }
+            AppEvent::BuilderJobLoaded(job) => {
+                self.builder.current_job = Some(job);
+                self.builder.loading = false;
+            }
+            AppEvent::BuilderError(err) => {
+                self.builder.status_msg = err;
+                self.builder.loading = false;
+            }
+            AppEvent::BuilderProposalSubmitted {
+                job_id,
+                approval_id,
+            } => {
+                self.builder.status_msg =
+                    format!("Submitted for approval: job {job_id} / approval {approval_id}");
+                self.builder.sub = builder::BuilderSubScreen::List;
+                self.refresh_builder();
+            }
+            AppEvent::BuilderActionMessage(msg) => {
+                self.builder.status_msg = msg;
+                self.builder.current_job = None;
+                self.builder.sub = builder::BuilderSubScreen::List;
+                self.refresh_builder();
+            }
             AppEvent::TriggerListLoaded(list) => {
                 self.triggers.triggers = list;
                 if !self.triggers.triggers.is_empty() {
@@ -359,6 +438,10 @@ impl App {
                     Tab::Extensions => self.extensions.status_msg = err,
                     Tab::Templates => self.templates.status_msg = err,
                     Tab::Settings => self.settings.status_msg = err,
+                    Tab::Builder => {
+                        self.builder.status_msg = err;
+                        self.builder.loading = false;
+                    }
                     _ => {}
                 }
             }
@@ -520,6 +603,11 @@ impl App {
                 {
                     self.comms.event_list_state.select(Some(0));
                 }
+                self.comms.loading = false;
+            }
+            AppEvent::CommsLoadFailed(err) => {
+                self.comms.status_msg = err;
+                self.comms.loading = false;
             }
             AppEvent::CommsSendResult(msg) => {
                 self.comms.status_msg = msg;
@@ -527,6 +615,7 @@ impl App {
             }
             AppEvent::CommsTaskResult(msg) => {
                 self.comms.status_msg = msg;
+                self.refresh_comms();
             }
             AppEvent::LogsLoaded(entries) => {
                 self.logs.entries = entries;
@@ -593,6 +682,7 @@ impl App {
                 {
                     self.extensions.health_list.select(Some(0));
                 }
+                self.extensions.loading = false;
             }
             AppEvent::ExtensionInstalled(id) => {
                 self.extensions.status_msg = format!("Installed: {id}");
@@ -821,6 +911,10 @@ impl App {
                     let action = self.workflows.handle_key(key);
                     self.handle_workflow_action(action);
                 }
+                Tab::Builder => {
+                    let action = self.builder.handle_key(key);
+                    self.handle_builder_action(action);
+                }
                 Tab::Triggers => {
                     let action = self.triggers.handle_key(key);
                     self.handle_trigger_action(action);
@@ -892,6 +986,7 @@ impl App {
         self.dashboard.tick();
         self.channels.tick();
         self.workflows.tick();
+        self.builder.tick();
         self.triggers.tick();
         self.sessions.tick();
         self.memory.tick();
@@ -950,6 +1045,7 @@ impl App {
             Tab::Agents => self.refresh_agents(),
             Tab::Channels => self.refresh_channels(),
             Tab::Workflows => self.refresh_workflows(),
+            Tab::Builder => self.refresh_builder(),
             Tab::Triggers => self.refresh_triggers(),
             Tab::Sessions => self.refresh_sessions(),
             Tab::Memory => self.refresh_memory(),
@@ -1017,6 +1113,13 @@ impl App {
         }
     }
 
+    fn refresh_builder(&mut self) {
+        if let Some(backend) = self.backend.to_ref() {
+            self.builder.loading = true;
+            event::spawn_fetch_builder_jobs(backend, self.event_tx.clone());
+        }
+    }
+
     fn refresh_triggers(&mut self) {
         if let Some(backend) = self.backend.to_ref() {
             self.triggers.loading = true;
@@ -1062,6 +1165,7 @@ impl App {
 
     fn refresh_extension_health(&mut self) {
         if let Some(backend) = self.backend.to_ref() {
+            self.extensions.loading = true;
             event::spawn_fetch_extension_health(backend, self.event_tx.clone());
         }
     }
@@ -1109,6 +1213,7 @@ impl App {
 
     fn refresh_settings_tools(&mut self) {
         if let Some(backend) = self.backend.to_ref() {
+            self.settings.loading = true;
             event::spawn_fetch_tools(backend, self.event_tx.clone());
         }
     }
@@ -1123,6 +1228,7 @@ impl App {
     fn refresh_comms(&mut self) {
         if let Some(backend) = self.backend.to_ref() {
             self.comms.loading = true;
+            self.comms.status_msg.clear();
             event::spawn_fetch_comms(backend, self.event_tx.clone());
         }
     }
@@ -1447,6 +1553,61 @@ impl App {
         }
     }
 
+    fn handle_builder_action(&mut self, action: builder::BuilderAction) {
+        match action {
+            builder::BuilderAction::Continue => {}
+            builder::BuilderAction::Refresh => self.refresh_builder(),
+            builder::BuilderAction::AnalyzeGoal(goal) => {
+                if let Some(backend) = self.backend.to_ref() {
+                    self.builder.loading = true;
+                    event::spawn_analyze_builder_goal(backend, goal, self.event_tx.clone());
+                }
+            }
+            builder::BuilderAction::SubmitProposal {
+                proposal,
+                activate_after_create,
+            } => {
+                if let Some(backend) = self.backend.to_ref() {
+                    self.builder.loading = true;
+                    event::spawn_submit_builder_proposal(
+                        backend,
+                        proposal,
+                        activate_after_create,
+                        self.event_tx.clone(),
+                    );
+                }
+            }
+            builder::BuilderAction::LoadJob(job_id) => {
+                if let Some(backend) = self.backend.to_ref() {
+                    self.builder.loading = true;
+                    event::spawn_fetch_builder_job(backend, job_id, self.event_tx.clone());
+                }
+            }
+            builder::BuilderAction::Approve(approval_id) => {
+                if let Some(backend) = self.backend.to_ref() {
+                    self.builder.loading = true;
+                    event::spawn_respond_builder_approval(
+                        backend,
+                        approval_id,
+                        true,
+                        self.event_tx.clone(),
+                    );
+                }
+            }
+            builder::BuilderAction::Reject(approval_id) => {
+                if let Some(backend) = self.backend.to_ref() {
+                    self.builder.loading = true;
+                    event::spawn_respond_builder_approval(
+                        backend,
+                        approval_id,
+                        false,
+                        self.event_tx.clone(),
+                    );
+                }
+            }
+        }
+    }
+
     fn handle_trigger_action(&mut self, action: triggers::TriggerAction) {
         match action {
             triggers::TriggerAction::Continue => {}
@@ -1704,9 +1865,9 @@ impl App {
         match action {
             comms::CommsAction::Continue => {}
             comms::CommsAction::Refresh => self.refresh_comms(),
-            comms::CommsAction::SendMessage { from, to, msg } => {
+            comms::CommsAction::SendMessage { payload } => {
                 if let Some(backend) = self.backend.to_ref() {
-                    event::spawn_comms_send(backend, from, to, msg, self.event_tx.clone());
+                    event::spawn_comms_send(backend, payload, self.event_tx.clone());
                 }
             }
             comms::CommsAction::PostTask {
@@ -2225,6 +2386,7 @@ impl App {
                     Tab::Chat => chat::draw(frame, chunks[1], &mut self.chat),
                     Tab::Channels => channels::draw(frame, chunks[1], &mut self.channels),
                     Tab::Workflows => workflows::draw(frame, chunks[1], &mut self.workflows),
+                    Tab::Builder => builder::draw(frame, chunks[1], &mut self.builder),
                     Tab::Triggers => triggers::draw(frame, chunks[1], &mut self.triggers),
                     Tab::Sessions => sessions::draw(frame, chunks[1], &mut self.sessions),
                     Tab::Memory => memory::draw(frame, chunks[1], &mut self.memory),

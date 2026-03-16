@@ -63,6 +63,7 @@ class OpenFang:
         self.memory = _MemoryResource(self)
         self.triggers = _TriggerResource(self)
         self.schedules = _ScheduleResource(self)
+        self.comms = _CommsResource(self)
 
     def _request(self, method: str, path: str, body: Any = None) -> Any:
         url = self.base_url + path
@@ -202,6 +203,25 @@ class _AgentResource(_Resource):
     def set_skills(self, agent_id: str, skills):
         return self._c._request("PUT", f"/api/agents/{agent_id}/skills", skills)
 
+    def upload(
+        self,
+        agent_id: str,
+        data: bytes,
+        filename: str,
+        content_type: str = "application/octet-stream",
+    ):
+        url = self._c.base_url + f"/api/agents/{agent_id}/upload"
+        headers = dict(self._c._headers)
+        headers["Content-Type"] = content_type
+        headers["X-Filename"] = filename
+        req = Request(url, data=data, headers=headers, method="POST")
+        try:
+            with urlopen(req) as resp:
+                return json.loads(resp.read().decode())
+        except HTTPError as e:
+            body_text = e.read().decode() if e.fp else ""
+            raise OpenFangError(f"HTTP {e.code}: {body_text}", e.code, body_text) from e
+
     def set_identity(self, agent_id: str, **identity):
         return self._c._request("PATCH", f"/api/agents/{agent_id}/identity", identity)
 
@@ -221,6 +241,24 @@ class _SessionResource(_Resource):
 
     def set_label(self, session_id: str, label: str):
         return self._c._request("PUT", f"/api/sessions/{session_id}/label", {"label": label})
+
+
+# ── Comms Resource ──────────────────────────────────────────────
+
+class _CommsResource(_Resource):
+
+    def send(self, **payload):
+        return self._c._request("POST", "/api/comms/send", payload)
+
+    def task(self, **payload):
+        return self._c._request("POST", "/api/comms/task", payload)
+
+    def topology(self):
+        return self._c._request("GET", "/api/comms/topology")
+
+    def events(self, limit: Optional[int] = None):
+        suffix = f"?limit={limit}" if limit is not None else ""
+        return self._c._request("GET", f"/api/comms/events{suffix}")
 
 
 # ── Workflow Resource ───────────────────────────────────────────

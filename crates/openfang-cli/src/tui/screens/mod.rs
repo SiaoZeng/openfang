@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod audit;
+pub mod builder;
 pub mod channels;
 pub mod chat;
 pub mod comms;

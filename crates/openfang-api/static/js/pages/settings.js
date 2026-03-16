@@ -33,6 +33,7 @@ function settingsPage() {
     addingCustomProvider: false,
     loading: true,
     loadError: '',
+    loadWarnings: [],
 
     // -- Dynamic config state --
     configSchema: null,
@@ -165,6 +166,7 @@ function settingsPage() {
     async loadSettings() {
       this.loading = true;
       this.loadError = '';
+      this.loadWarnings = [];
       try {
         await Promise.all([
           this.loadSysInfo(),
@@ -202,20 +204,29 @@ function settingsPage() {
       try {
         var data = await OpenFangAPI.get('/api/usage');
         this.usageData = data.agents || [];
-      } catch(e) { this.usageData = []; }
+      } catch(e) {
+        this.usageData = [];
+        this.recordLoadWarning('usage', e);
+      }
     },
 
     async loadTools() {
       try {
         var data = await OpenFangAPI.get('/api/tools');
         this.tools = data.tools || [];
-      } catch(e) { this.tools = []; }
+      } catch(e) {
+        this.tools = [];
+        this.recordLoadWarning('tools', e);
+      }
     },
 
     async loadConfig() {
       try {
         this.config = await OpenFangAPI.get('/api/config');
-      } catch(e) { this.config = {}; }
+      } catch(e) {
+        this.config = {};
+        this.recordLoadWarning('config', e);
+      }
     },
 
     async loadProviders() {
@@ -233,14 +244,27 @@ function settingsPage() {
             }
           }
         }
-      } catch(e) { this.providers = []; }
+      } catch(e) {
+        this.providers = [];
+        this.recordLoadWarning('providers', e);
+      }
     },
 
     async loadModels() {
       try {
         var data = await OpenFangAPI.get('/api/models');
         this.models = data.models || [];
-      } catch(e) { this.models = []; }
+      } catch(e) {
+        this.models = [];
+        this.recordLoadWarning('models', e);
+      }
+    },
+
+    recordLoadWarning(section, error) {
+      var message = section + ': ' + ((error && error.message) || 'request failed');
+      if (this.loadWarnings.indexOf(message) === -1) {
+        this.loadWarnings.push(message);
+      }
     },
 
     async addCustomModel() {

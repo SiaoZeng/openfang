@@ -17,3 +17,9 @@ pub enum KernelError {
 
 /// Alias for kernel results.
 pub type KernelResult<T> = Result<T, KernelError>;
+
+impl From<std::io::Error> for KernelError {
+    fn from(value: std::io::Error) -> Self {
+        OpenFangError::Io(value).into()
+    }
+}

@@ -140,6 +140,26 @@ pub async fn build_router(
             axum::routing::get(routes::list_agents).post(routes::spawn_agent),
         )
         .route(
+            "/api/routing/capabilities",
+            axum::routing::get(routes::list_routing_capabilities),
+        )
+        .route(
+            "/api/routing/proposals",
+            axum::routing::post(routes::create_routing_proposal),
+        )
+        .route(
+            "/api/routing/proposals/apply",
+            axum::routing::post(routes::apply_routing_proposal),
+        )
+        .route(
+            "/api/routing/proposals/jobs",
+            axum::routing::get(routes::list_routing_proposal_jobs),
+        )
+        .route(
+            "/api/routing/proposals/jobs/{id}",
+            axum::routing::get(routes::get_routing_proposal_job),
+        )
+        .route(
             "/api/agents/{id}",
             axum::routing::get(routes::get_agent)
                 .delete(routes::kill_agent)
@@ -150,6 +170,10 @@ pub async fn build_router(
             axum::routing::put(routes::set_agent_mode),
         )
         .route("/api/profiles", axum::routing::get(routes::list_profiles))
+        .route(
+            "/api/profiles/{name}",
+            axum::routing::get(routes::get_profile),
+        )
         .route(
             "/api/agents/{id}/restart",
             axum::routing::post(routes::restart_agent),
@@ -414,8 +438,20 @@ pub async fn build_router(
         // MCP server endpoints
         .route(
             "/api/mcp/servers",
-            axum::routing::get(routes::list_mcp_servers),
+            axum::routing::get(routes::list_mcp_servers).post(routes::add_mcp_server),
         )
+        .route(
+            "/api/mcp/servers/{name}",
+            axum::routing::put(routes::update_mcp_server).delete(routes::delete_mcp_server),
+        )
+        // Backup / Restore endpoints
+        .route("/api/backup", axum::routing::post(routes::create_backup))
+        .route("/api/backups", axum::routing::get(routes::list_backups))
+        .route(
+            "/api/backups/{filename}",
+            axum::routing::delete(routes::delete_backup),
+        )
+        .route("/api/restore", axum::routing::post(routes::restore_backup))
         // Audit endpoints
         .route(
             "/api/audit/recent",
@@ -453,6 +489,7 @@ pub async fn build_router(
     let app = app
         // Tools endpoint
         .route("/api/tools", axum::routing::get(routes::list_tools))
+        .route("/api/tools/{name}", axum::routing::get(routes::get_tool))
         // Config endpoints
         .route("/api/config", axum::routing::get(routes::get_config))
         .route(
@@ -576,7 +613,7 @@ pub async fn build_router(
         )
         .route(
             "/api/cron/jobs/{id}",
-            axum::routing::delete(routes::delete_cron_job),
+            axum::routing::delete(routes::delete_cron_job).put(routes::update_cron_job),
         )
         .route(
             "/api/cron/jobs/{id}/enable",
@@ -625,6 +662,10 @@ pub async fn build_router(
         .route(
             "/api/a2a/agents",
             axum::routing::get(routes::a2a_list_external_agents),
+        )
+        .route(
+            "/api/a2a/agents/{*id}",
+            axum::routing::get(routes::a2a_get_external_agent),
         )
         .route(
             "/api/a2a/discover",
@@ -738,7 +779,7 @@ pub async fn run_daemon(
     // Config file hot-reload watcher (polls every 30 seconds)
     {
         let k = kernel.clone();
-        let config_path = kernel.config.home_dir.join("config.toml");
+        let config_path = kernel.config_path().to_path_buf();
         tokio::spawn(async move {
             let mut last_modified = std::fs::metadata(&config_path)
                 .and_then(|m| m.modified())

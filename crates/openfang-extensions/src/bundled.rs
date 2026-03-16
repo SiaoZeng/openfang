@@ -1,6 +1,6 @@
 //! Compile-time embedded integration templates.
 //!
-//! All 25 integration TOML files are baked into the binary via `include_str!()`,
+//! All 26 integration TOML files are baked into the binary via `include_str!()`,
 //! ensuring they ship with every OpenFang build with zero filesystem dependencies.
 
 /// Returns all bundled integration templates as `(id, TOML content)` pairs.
@@ -13,6 +13,10 @@ pub fn bundled_integrations() -> Vec<(&'static str, &'static str)> {
         ("jira", include_str!("../integrations/jira.toml")),
         ("bitbucket", include_str!("../integrations/bitbucket.toml")),
         ("sentry", include_str!("../integrations/sentry.toml")),
+        (
+            "chrome-devtools",
+            include_str!("../integrations/chrome-devtools.toml"),
+        ),
         // ── Productivity (6) ────────────────────────────────────────────────
         (
             "google-calendar",
@@ -71,7 +75,7 @@ mod tests {
 
     #[test]
     fn bundled_count() {
-        assert_eq!(bundled_integrations().len(), 25);
+        assert_eq!(bundled_integrations().len(), 26);
     }
 
     #[test]
@@ -115,7 +119,7 @@ mod tests {
             .iter()
             .filter(|t| t.category == crate::IntegrationCategory::AI)
             .count();
-        assert_eq!(devtools, 6);
+        assert_eq!(devtools, 7);
         assert_eq!(productivity, 6);
         assert_eq!(communication, 3);
         assert_eq!(data, 5);

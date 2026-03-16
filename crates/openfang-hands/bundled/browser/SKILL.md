@@ -1,16 +1,49 @@
 ---
 name: browser-automation
 version: "1.0.0"
-description: Playwright-based browser automation patterns for autonomous web interaction
+description: Chrome DevTools MCP-first browser automation patterns for autonomous web interaction
 author: OpenFang
-tags: [browser, automation, playwright, web, scraping]
-tools: [browser_navigate, browser_click, browser_type, browser_screenshot, browser_read_page, browser_close]
+tags: [browser, automation, chrome, devtools, mcp, web, scraping]
+tools: [mcp_chrome_devtools_new_page, mcp_chrome_devtools_navigate_page, mcp_chrome_devtools_take_snapshot, mcp_chrome_devtools_click, mcp_chrome_devtools_fill, mcp_chrome_devtools_take_screenshot, browser_navigate, browser_click, browser_type, browser_screenshot, browser_read_page, browser_close]
 runtime: prompt_only
 ---
 
 # Browser Automation Skill
 
-## Playwright CSS Selector Reference
+Prefer the Chrome DevTools MCP toolchain when it is available. Use builtin `browser_*` tools as a fallback path only.
+
+## Chrome DevTools MCP Interaction Reference
+
+### Core Flow
+| Tool | Use Case |
+|------|----------|
+| `mcp_chrome_devtools_new_page` | Open a fresh tab |
+| `mcp_chrome_devtools_select_page` | Switch to the correct active page |
+| `mcp_chrome_devtools_navigate_page` | Go to a URL or reload |
+| `mcp_chrome_devtools_take_snapshot` | Read the current structured page state and get `uid`s |
+| `mcp_chrome_devtools_click` | Click an element by `uid` |
+| `mcp_chrome_devtools_fill` / `fill_form` | Fill inputs by `uid` |
+| `mcp_chrome_devtools_press_key` | Submit forms, shortcuts, or keyboard navigation |
+| `mcp_chrome_devtools_wait_for` | Wait for target text or content changes |
+| `mcp_chrome_devtools_take_screenshot` | Visual verification |
+
+### Debugging & Extraction
+| Tool | Use Case |
+|------|----------|
+| `mcp_chrome_devtools_evaluate_script` | Structured DOM reads or extraction |
+| `mcp_chrome_devtools_list_console_messages` | Check client-side errors |
+| `mcp_chrome_devtools_list_network_requests` | Inspect XHR/fetch activity |
+| `mcp_chrome_devtools_get_network_request` | Read request/response details |
+
+## Builtin Browser Fallback
+
+If the MCP server is unavailable or the task is simpler with the builtin browser runtime, fall back to:
+- `browser_navigate`
+- `browser_click`
+- `browser_type`
+- `browser_read_page`
+- `browser_screenshot`
+- `browser_close`
 
 ### Basic Selectors
 | Selector | Description | Example |
@@ -57,37 +90,38 @@ runtime: prompt_only
 
 ### Product Search & Purchase
 ```
-1. browser_navigate → store homepage
-2. browser_type → search box with product name
-3. browser_click → search button or press Enter
-4. browser_read_page → scan results
-5. browser_click → desired product
-6. browser_read_page → verify product details & price
-7. browser_click → "Add to Cart"
-8. browser_navigate → cart page
-9. browser_read_page → verify cart contents & total
-10. STOP → Report to user, wait for approval
-11. browser_click → "Proceed to Checkout" (only after approval)
+1. mcp_chrome_devtools_new_page → open tab
+2. mcp_chrome_devtools_navigate_page → store homepage
+3. mcp_chrome_devtools_take_snapshot → capture current `uid`s
+4. mcp_chrome_devtools_fill / type_text → search box
+5. mcp_chrome_devtools_click or press_key Enter → submit search
+6. mcp_chrome_devtools_take_snapshot → scan results
+7. mcp_chrome_devtools_click → desired product
+8. mcp_chrome_devtools_take_snapshot → verify product details & price
+9. mcp_chrome_devtools_click → "Add to Cart"
+10. Navigate to cart and verify total
+11. STOP → Report to user, wait for approval
+12. Only then continue toward checkout
 ```
 
 ### Account Login
 ```
-1. browser_navigate → login page
-2. browser_type → email/username field
-3. browser_type → password field
-4. browser_click → login/submit button
-5. browser_read_page → verify successful login
+1. Navigate to login page
+2. Take snapshot and identify username/password `uid`s
+3. Fill credentials
+4. Click submit or press Enter
+5. Snapshot again to verify success
 ```
 
 ### Form Submission
 ```
-1. browser_navigate → form page
-2. browser_read_page → understand form structure
-3. browser_type → fill each field sequentially
-4. browser_click → checkboxes/radio buttons as needed
-5. browser_screenshot → visual verification before submit
-6. browser_click → submit button
-7. browser_read_page → verify confirmation
+1. Navigate to form page
+2. Take snapshot → understand structure and `uid`s
+3. Fill fields with MCP fill tools
+4. Click checkboxes/radio buttons as needed
+5. Take screenshot before submit
+6. Submit and snapshot again
+7. Verify confirmation state
 ```
 
 ### Price Comparison
