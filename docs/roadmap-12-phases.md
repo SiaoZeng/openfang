@@ -31,7 +31,8 @@ The core product direction is:
 - Phase 7 completed on 2026-03-16
 - Phase 8 completed on 2026-03-16
 - Phase 9 completed on 2026-03-16
-- Current recommended next step: Phase 10 (Extensions API)
+- Phase 10 completed on 2026-03-16
+- Current recommended next step: Phase 11 (Provider Catalog Modernization)
 
 ## Phase 1: API Detail Endpoints
 
@@ -315,6 +316,9 @@ Done when:
 ## Phase 10: Extensions API
 
 Goal: expose the integration system as an administrable product surface.
+
+Status:
+- completed on 2026-03-16
 
 Scope:
 - list extensions

@@ -21,6 +21,7 @@ All responses include security headers (CSP, X-Frame-Options, X-Content-Type-Opt
 - [Provider Configuration Endpoints](#provider-configuration-endpoints)
 - [Skills & Marketplace Endpoints](#skills--marketplace-endpoints)
 - [ClawHub Endpoints](#clawhub-endpoints)
+- [Integration Management Endpoints](#integration-management-endpoints)
 - [MCP & A2A Protocol Endpoints](#mcp--a2a-protocol-endpoints)
 - [Audit & Security Endpoints](#audit--security-endpoints)
 - [Usage & Analytics Endpoints](#usage--analytics-endpoints)
@@ -1830,6 +1831,149 @@ Install a skill from ClawHub. Downloads, verifies SHA256 checksum, scans for pro
   "version": "1.2.0",
   "converted_from": "SKILL.md"
 }
+```
+
+---
+
+## Integration Management Endpoints
+
+Manage MCP server integrations. OpenFang bundles 26 integration templates (GitHub, Slack, PostgreSQL, AWS, etc.) that can be installed, monitored, and hot-reloaded at runtime.
+
+### GET /api/integrations
+
+List installed integrations with status and health.
+
+**Response** `200 OK`:
+
+```json
+{
+  "installed": [
+    {
+      "id": "github",
+      "name": "GitHub",
+      "icon": "\ud83d\udc19",
+      "category": "DevTools",
+      "status": "ready",
+      "tool_count": 12,
+      "installed_at": "2026-03-16T10:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+Status values: `ready`, `installed`, `disabled`, `error`.
+
+### GET /api/integrations/available
+
+Browse all available integration templates.
+
+**Response** `200 OK`:
+
+```json
+{
+  "integrations": [
+    {
+      "id": "github",
+      "name": "GitHub",
+      "description": "Access GitHub repositories, issues, pull requests...",
+      "icon": "\ud83d\udc19",
+      "category": "DevTools",
+      "installed": true,
+      "tags": ["git", "vcs", "code", "issues"],
+      "required_env": [
+        {
+          "name": "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "label": "GitHub Personal Access Token",
+          "help": "A fine-grained or classic PAT",
+          "is_secret": true,
+          "get_url": "https://github.com/settings/tokens"
+        }
+      ],
+      "has_oauth": true,
+      "setup_instructions": "..."
+    }
+  ],
+  "count": 26
+}
+```
+
+### POST /api/integrations/add
+
+Install an integration by template ID. Automatically starts the MCP server and connects it.
+
+**Request**:
+
+```json
+{ "id": "github" }
+```
+
+**Response** `201 Created`:
+
+```json
+{
+  "id": "github",
+  "status": "installed",
+  "connected": true,
+  "message": "Integration 'github' installed"
+}
+```
+
+**Errors**: `400` missing ID, `404` unknown template, `409` already installed.
+
+### DELETE /api/integrations/{id}
+
+Remove an installed integration and disconnect its MCP server.
+
+**Response** `200 OK`:
+
+```json
+{ "id": "github", "status": "removed" }
+```
+
+### POST /api/integrations/{id}/reconnect
+
+Manually reconnect a failed MCP server.
+
+**Response** `200 OK`:
+
+```json
+{ "id": "github", "status": "connected", "tool_count": 12 }
+```
+
+### GET /api/integrations/health
+
+Health status for all monitored integrations, including auto-reconnect state.
+
+**Response** `200 OK`:
+
+```json
+{
+  "health": [
+    {
+      "id": "github",
+      "status": "Ready",
+      "tool_count": 12,
+      "last_ok": "2026-03-16T12:00:00Z",
+      "last_error": null,
+      "consecutive_failures": 0,
+      "reconnecting": false,
+      "reconnect_attempts": 0,
+      "connected_since": "2026-03-16T10:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+### POST /api/integrations/reload
+
+Hot-reload all integration configs from disk and reconnect MCP servers.
+
+**Response** `200 OK`:
+
+```json
+{ "status": "reloaded", "new_connections": 3 }
 ```
 
 ---

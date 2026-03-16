@@ -164,6 +164,10 @@
               <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v6"/><path d="M10 10.5V6a2 2 0 0 0-2-2 2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-5.7-2.4L3.4 16a2 2 0 0 1 3.2-2.4L8 15"/></svg></span>
               <span class="nav-label">Hands</span>
             </a>
+            <a class="nav-item" :class="{ active: page === 'extensions' }" @click="navigate('extensions')" :aria-current="page === 'extensions' ? 'page' : false">
+              <span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></span>
+              <span class="nav-label">Extensions</span>
+            </a>
           </div>
         </template>
       </div>
@@ -3351,6 +3355,183 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
             <div class="flex items-center gap-2">
               <span style="color:var(--success);font-size:1.2rem">\u2713</span>
               <span x-text="activateResult"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Page: Extensions -->
+    <template x-if="page === 'extensions'">
+      <div x-data="extensionsPage">
+        <div class="page-header"><h2>Extensions</h2></div>
+        <div class="page-body" x-init="loadData()">
+          <div class="info-card">
+            <h4>Extensions &mdash; MCP Integration Marketplace</h4>
+            <p>Browse, install, and manage MCP server integrations. Each extension connects external tools (GitHub, Slack, databases, cloud providers) to your agents via the Model Context Protocol.</p>
+          </div>
+
+          <div x-show="loading" class="loading-state"><div class="spinner"></div><span>Loading extensions...</span></div>
+          <div x-show="!loading && loadError" class="error-state">
+            <span class="error-icon">!</span>
+            <p x-text="loadError"></p>
+            <button class="btn btn-ghost btn-sm" @click="loadData()">Retry</button>
+          </div>
+
+          <div x-show="!loading && !loadError">
+            <!-- Tabs -->
+            <div class="tabs">
+              <div class="tab" :class="{ active: tab === 'available' }" @click="tab = 'available'">
+                Available <span class="badge badge-dim" x-show="available.length" x-text="available.length" style="margin-left:4px"></span>
+              </div>
+              <div class="tab" :class="{ active: tab === 'installed' }" @click="tab = 'installed'; loadInstalled()">
+                Installed <span class="badge badge-success" x-show="installed.length" x-text="installed.length" style="margin-left:4px"></span>
+              </div>
+              <div class="tab" :class="{ active: tab === 'health' }" @click="tab = 'health'; loadHealth()">
+                Health
+              </div>
+            </div>
+
+            <!-- TAB: Available -->
+            <div x-show="tab === 'available'">
+              <!-- Search + Category Filter -->
+              <div class="flex gap-2 mb-3" style="flex-wrap:wrap">
+                <input type="text" class="input" x-model="searchQuery" placeholder="Search extensions..." style="max-width:280px">
+                <select class="input" x-model="selectedCategory" style="max-width:180px">
+                  <option value="">All categories</option>
+                  <template x-for="(count, cat) in categories" :key="cat">
+                    <option :value="cat" x-text="cat + ' (' + count + ')'"></option>
+                  </template>
+                </select>
+              </div>
+
+              <div class="card-grid" x-show="filteredAvailable.length">
+                <template x-for="ext in filteredAvailable" :key="ext.id">
+                  <div class="card">
+                    <div class="flex justify-between items-center mb-2">
+                      <div class="flex items-center gap-2">
+                        <span style="font-size:1.4rem" x-text="ext.icon"></span>
+                        <div class="card-header" style="margin:0" x-text="ext.name"></div>
+                      </div>
+                      <span class="badge" :class="ext.installed ? 'badge-success' : 'badge-dim'" x-text="ext.installed ? 'Installed' : 'Available'"></span>
+                    </div>
+                    <div class="card-meta" x-text="ext.description"></div>
+
+                    <!-- Tags -->
+                    <div class="mt-2 flex gap-1" style="flex-wrap:wrap" x-show="ext.tags && ext.tags.length">
+                      <template x-for="tag in ext.tags" :key="tag">
+                        <span class="category-badge" style="font-size:0.6rem" x-text="tag"></span>
+                      </template>
+                    </div>
+
+                    <!-- Required credentials -->
+                    <div class="mt-2" x-show="ext.required_env && ext.required_env.length">
+                      <div class="text-xs text-dim mb-1" style="letter-spacing:0.5px">CREDENTIALS</div>
+                      <template x-for="env in ext.required_env" :key="env.name">
+                        <div class="flex items-center gap-2 text-xs" style="padding:2px 0">
+                          <span class="text-dim" x-text="env.label"></span>
+                          <a x-show="env.get_url" :href="env.get_url" target="_blank" rel="noopener" class="text-xs" style="color:var(--accent)">Get key</a>
+                        </div>
+                      </template>
+                    </div>
+
+                    <div class="mt-2">
+                      <span class="category-badge" style="font-size:0.65rem" x-text="ext.category"></span>
+                      <span class="text-xs text-dim" x-show="ext.has_oauth" style="margin-left:8px">OAuth</span>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex justify-end mt-3">
+                      <template x-if="!ext.installed">
+                        <button class="btn btn-primary btn-sm" @click="install(ext.id)" :disabled="installingId === ext.id" x-text="installingId === ext.id ? 'Installing...' : 'Install'"></button>
+                      </template>
+                      <template x-if="ext.installed">
+                        <button class="btn btn-ghost btn-sm" @click="remove(ext.id)" :disabled="removingId === ext.id" x-text="removingId === ext.id ? 'Removing...' : 'Remove'"></button>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <div class="empty-state" x-show="!filteredAvailable.length && (searchQuery || selectedCategory)">
+                <h3>No matching extensions</h3>
+                <p>Try adjusting your search or category filter.</p>
+              </div>
+            </div>
+
+            <!-- TAB: Installed -->
+            <div x-show="tab === 'installed'">
+              <div class="flex justify-end mb-3">
+                <button class="btn btn-ghost btn-sm" @click="reload()">Reload All</button>
+              </div>
+              <div x-show="!installed.length" class="empty-state">
+                <div class="empty-state-icon">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                </div>
+                <h3>No extensions installed</h3>
+                <p>Browse the Available tab to install MCP integrations.</p>
+              </div>
+              <div class="card-grid" x-show="installed.length">
+                <template x-for="inst in installed" :key="inst.id">
+                  <div class="card">
+                    <div class="flex justify-between items-center mb-2">
+                      <div class="flex items-center gap-2">
+                        <span style="font-size:1.4rem" x-text="inst.icon"></span>
+                        <div class="card-header" style="margin:0" x-text="inst.name"></div>
+                      </div>
+                      <span class="badge" :class="{ 'badge-success': inst.status === 'ready', 'badge-dim': inst.status === 'disabled' || inst.status === 'installed', 'badge-error': inst.status === 'error' }" x-text="inst.status"></span>
+                    </div>
+                    <div class="text-xs text-dim" x-text="inst.category"></div>
+                    <div class="text-xs text-dim" x-show="inst.tool_count" x-text="inst.tool_count + ' tool(s) loaded'"></div>
+                    <div class="text-xs text-dim" x-show="inst.installed_at" x-text="'Installed: ' + formatDate(inst.installed_at)"></div>
+                    <div class="flex gap-2 mt-3">
+                      <button class="btn btn-ghost btn-sm" @click="reconnect(inst.id)" :disabled="reconnectingId === inst.id" x-text="reconnectingId === inst.id ? 'Connecting...' : 'Reconnect'"></button>
+                      <button class="btn btn-ghost btn-sm" style="color:var(--danger)" @click="remove(inst.id)" :disabled="removingId === inst.id" x-text="removingId === inst.id ? 'Removing...' : 'Remove'"></button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- TAB: Health -->
+            <div x-show="tab === 'health'">
+              <div class="flex justify-end mb-3">
+                <button class="btn btn-ghost btn-sm" @click="loadHealth()">Refresh</button>
+              </div>
+              <div x-show="!health.length" class="empty-state">
+                <h3>No health data</h3>
+                <p>Install extensions to see their connection status here.</p>
+              </div>
+              <div x-show="health.length">
+                <table class="data-table" style="width:100%">
+                  <thead>
+                    <tr>
+                      <th>Integration</th>
+                      <th>Status</th>
+                      <th>Tools</th>
+                      <th>Failures</th>
+                      <th>Connected Since</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="h in health" :key="h.id">
+                      <tr>
+                        <td x-text="h.id" style="font-weight:600"></td>
+                        <td><span class="badge" :class="healthBadge(h).cls" x-text="healthBadge(h).text"></span></td>
+                        <td x-text="h.tool_count || 0"></td>
+                        <td>
+                          <span x-text="h.consecutive_failures || 0"></span>
+                          <span class="text-xs text-dim" x-show="h.last_error" x-text="' — ' + h.last_error" style="max-width:200px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle"></span>
+                        </td>
+                        <td class="text-xs text-dim" x-text="h.connected_since ? formatDate(h.connected_since) : '—'"></td>
+                        <td>
+                          <button class="btn btn-ghost btn-sm" @click="reconnect(h.id)" :disabled="reconnectingId === h.id" x-text="reconnectingId === h.id ? '...' : 'Reconnect'"></button>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
