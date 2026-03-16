@@ -72,7 +72,7 @@ This cuts link time significantly (thin LTO, 8 codegen units, `opt-level=2`) whi
 cargo test --workspace
 ```
 
-The test suite is currently 1,744+ tests. All must pass before merging.
+The test suite is currently 1,848+ tests. All must pass before merging.
 
 ### Run Tests for a Single Crate
 
@@ -416,7 +416,7 @@ tools = ["my_tool"]
 2. **Make your changes**: Follow the code style guidelines above.
 
 3. **Test thoroughly**:
-   - `cargo test --workspace` must pass (all 1,744+ tests).
+   - `cargo test --workspace` must pass (all 1,848+ tests).
    - `cargo clippy --workspace --all-targets -- -D warnings` must produce zero warnings.
    - `cargo fmt --all --check` must produce no diff.
 

@@ -7,28 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Added — Phases 1-10 (Agent OS Roadmap)
 
-- Native Phase 9 capability builder flow:
-  - deterministic capability-gap analysis on top of the routing registry
-  - reviewable `agent`, `workflow`, and `hand` proposal drafts
-  - approval-backed proposal apply jobs with status tracking
-- Routing builder API:
-  - `GET /api/routing/capabilities`
-  - `POST /api/routing/proposals`
-  - `POST /api/routing/proposals/apply`
-  - `GET /api/routing/proposals/jobs`
-  - `GET /api/routing/proposals/jobs/{id}`
-- Dashboard Builder page for analyzing goals, submitting proposals, and tracking jobs
-- CLI builder commands:
-  - `openfang builder analyze`
-  - `openfang builder submit`
-  - `openfang builder jobs`
-  - `openfang builder job`
-- TUI Builder tab with goal analysis, proposal preview, and approval actions
+- **Phase 1: API detail endpoints** — `GET /api/tools/{name}`, `GET /api/profiles/{name}`, `GET /api/a2a/agents/{id}` for single-item lookups
+- **Phase 2: Cron CRUD completion** — `PUT /api/cron/jobs/{id}` for in-place job editing; CLI `openfang cron update` aligned
+- **Phase 3: Rich comms_send** — `thread_id` and file/media `attachments` on `/api/comms/send`; channel-target delivery mode; JavaScript and Python SDK updates
+- **Phase 4: MCP server CRUD API** — `POST /api/mcp/servers`, `PUT /api/mcp/servers/{name}`, `DELETE /api/mcp/servers/{name}` for runtime MCP management
+- **Phase 5: Backup and restore** — `POST /api/backup`, `GET /api/backups`, `DELETE /api/backups/{filename}`, `POST /api/restore` with ZIP archives, manifest validation, and atomic writes
+- **Phase 6: Deterministic hand identity** — UUID v5 stable instance IDs across daemon restarts; hand state persistence
+- **Phase 7: Builtin router** — deterministic rule-based goal routing to Hands, workflows, and specialist agents without LLM dependency
+- **Phase 8: Capability registry for routing** — `GET /api/routing/capabilities` exposing Hands, workflows, and agents as routable capabilities with keyword-based matching
+- **Phase 9: User-in-the-loop agent builder** — capability-gap analysis, reviewable proposals (agent/workflow/hand), approval-backed creation via `POST /api/routing/proposals` and `POST /api/routing/proposals/apply`; Dashboard Builder page; TUI Builder tab; CLI builder commands
+- **Phase 10: Extensions API** — Dashboard Extensions tab (browse/install/health); 7 integration management endpoints documented in api-reference.md
 
 ### Changed
 
+- `RoutingCapabilityKind` serde serialization normalized to snake_case for API consistency
 - `openfang approvals list` now renders the current approvals API object response correctly in human-readable mode
 
 ## [0.1.0] - 2026-02-24
@@ -45,11 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Visual workflow builder with drag-and-drop node graph, 7 node types, and TOML export
 - Trigger system with event pattern matching, content filters, and fire limits
 - Event bus with publish/subscribe and correlation IDs
-- 7 Hands packages for autonomous agent actions
+- 8 Hands packages for autonomous agent actions
 
 #### LLM Support
 - 3 native LLM drivers: Anthropic, Google Gemini, OpenAI-compatible
-- 27 providers: Anthropic, Gemini, OpenAI, Groq, OpenRouter, DeepSeek, Together, Mistral, Fireworks, Cohere, Perplexity, xAI, AI21, Cerebras, SambaNova, Hugging Face, Replicate, Ollama, vLLM, LM Studio, and more
+- 42 providers: Anthropic, Gemini, OpenAI, Groq, OpenRouter, DeepSeek, Together, Mistral, Fireworks, Cohere, Perplexity, xAI, AI21, Cerebras, SambaNova, Hugging Face, Replicate, Ollama, vLLM, LM Studio, Qwen, MiniMax, Zhipu, Moonshot, Qianfan, Bedrock, Azure, Nvidia, Venice, Chutes, GitHub Copilot, Claude Code, Qwen Code, Codex, Lemonade, and more
 - Model catalog with 130+ built-in models, 23 aliases, tier classification
 - Intelligent model routing with task complexity scoring
 - Fallback driver for automatic failover between providers

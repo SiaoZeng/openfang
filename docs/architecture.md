@@ -53,7 +53,7 @@ openfang-types          Shared types: Agent, Capability, Event, Memory, Message,
 |-------|-------------|
 | **openfang-types** | Core type definitions used across all crates. Defines `AgentManifest`, `AgentId`, `Capability`, `Event`, `ToolDefinition`, `KernelConfig`, `OpenFangError`, taint tracking (`TaintLabel`, `TaintSet`), Ed25519 manifest signing, model catalog types (`ModelCatalogEntry`, `ProviderInfo`, `ModelTier`), tool compatibility mappings (21 OpenClaw-to-OpenFang), MCP/A2A config types, and web config types. All config structs use `#[serde(default)]` for forward-compatible TOML parsing. |
 | **openfang-memory** | SQLite-backed memory substrate (schema v5). Uses `Arc<Mutex<Connection>>` with `spawn_blocking` for async bridge. Provides structured KV storage, semantic search with vector embeddings, knowledge graph (entities and relations), session management, task board, usage event persistence (`usage_events` table, `UsageStore`), and canonical sessions for cross-channel memory. Five schema versions: V1 core, V2 collab, V3 embeddings, V4 usage, V5 canonical_sessions. |
-| **openfang-runtime** | Agent execution engine. Contains the agent loop (`run_agent_loop`, `run_agent_loop_streaming`), 3 native LLM drivers (Anthropic, Gemini, OpenAI-compatible covering 20 providers), 23 built-in tools, WASM sandbox (Wasmtime with dual fuel+epoch metering), MCP client/server (JSON-RPC 2.0 over stdio/SSE), A2A protocol (AgentCard, task management), web search engine (4 providers: Tavily/Brave/Perplexity/DuckDuckGo), web fetch with SSRF protection, loop guard (SHA256-based tool loop detection), session repair (history validation), LLM session compactor (block-aware), Merkle hash chain audit trail, and embedding driver. Defines the `KernelHandle` trait that enables inter-agent tools without circular crate dependencies. |
+| **openfang-runtime** | Agent execution engine. Contains the agent loop (`run_agent_loop`, `run_agent_loop_streaming`), 3 native LLM drivers (Anthropic, Gemini, OpenAI-compatible covering 42 providers), 23 built-in tools, WASM sandbox (Wasmtime with dual fuel+epoch metering), MCP client/server (JSON-RPC 2.0 over stdio/SSE), A2A protocol (AgentCard, task management), web search engine (4 providers: Tavily/Brave/Perplexity/DuckDuckGo), web fetch with SSRF protection, loop guard (SHA256-based tool loop detection), session repair (history validation), LLM session compactor (block-aware), Merkle hash chain audit trail, and embedding driver. Defines the `KernelHandle` trait that enables inter-agent tools without circular crate dependencies. |
 | **openfang-kernel** | The central coordinator. `OpenFangKernel` assembles all subsystems: `AgentRegistry`, `AgentScheduler`, `CapabilityManager`, `EventBus`, `Supervisor`, `WorkflowEngine`, `TriggerEngine`, `BackgroundExecutor`, `WasmSandbox`, `ModelCatalog`, `MeteringEngine`, `ModelRouter`, `AuthManager` (RBAC), `HeartbeatMonitor`, `SetupWizard`, `SkillRegistry`, MCP connections, `WebToolsContext`, the native builtin router, and the capability-builder job store. Implements `KernelHandle` for inter-agent operations. Handles agent spawn/kill, message dispatch, deterministic routing, capability-gap analysis, approval-backed proposal application, workflow execution, trigger evaluation, capability inheritance validation, and graceful shutdown with state persistence. |
 | **openfang-api** | HTTP API server built on Axum 0.8 with agent, workflow, routing/builder, trigger, memory, channel, template, model, provider, skill, ClawHub, MCP, health, status, version, and shutdown surfaces. WebSocket handler for real-time agent chat with streaming. SSE endpoint for streaming responses. OpenAI-compatible endpoints (`POST /v1/chat/completions`, `GET /v1/models`). A2A endpoints (`/.well-known/agent.json`, `/a2a/*`). Middleware: Bearer token auth, request ID injection, structured request logging, GCRA rate limiter (cost-aware), security headers (CSP, X-Frame-Options, etc.), health endpoint redaction. |
 | **openfang-channels** | Channel bridge layer with 40 adapters. Each adapter implements the `ChannelAdapter` trait. Includes: Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Email, SMS, Webhook, Teams, Mattermost, IRC, Google Chat, Twitch, Rocket.Chat, Zulip, XMPP, LINE, Viber, Messenger, Reddit, Mastodon, Bluesky, Feishu, Revolt, Nextcloud, Guilded, Keybase, Threema, Nostr, Webex, Pumble, Flock, Twist, Mumble, DingTalk, Discourse, Gitter, Ntfy, Gotify, LinkedIn. Features: `AgentRouter` for message routing, `BridgeManager` for lifecycle coordination, `ChannelRateLimiter` (per-user DashMap tracking), `formatter.rs` (Markdown to TelegramHTML/SlackMrkdwn/PlainText), `ChannelOverrides` (model/system_prompt/dm_policy/group_policy/rate_limit/threading/output_format), DM/group policy enforcement. |
@@ -90,7 +90,7 @@ When `OpenFangKernel::boot_with_config()` is called (either by the daemon or in-
    - Validate driver config
 
 5. Initialize model catalog
-   - Build ModelCatalog with 51 builtin models, 20+ aliases, 20 providers
+   - Build ModelCatalog with 200 builtin models, 23 aliases, 42 providers
    - Run detect_auth() to check env var presence (never reads secrets)
    - Store as kernel.model_catalog
 
@@ -357,7 +357,7 @@ pub trait LlmDriver: Send + Sync {
 
 ### Provider Architecture
 
-Three native driver implementations cover all 20 providers with 51 models:
+Three native driver implementations cover all 42 providers with 200 models:
 
 1. **AnthropicDriver**: Native Anthropic Messages API. Handles Claude-specific features (content blocks including images, tool use blocks, streaming deltas). Supports `ContentBlock::Image` with media type validation and 5MB cap.
 
@@ -418,9 +418,9 @@ The `ModelCatalog` (`openfang-runtime/src/model_catalog.rs`) provides a registry
 
 ### Registry Contents
 
-- **51 builtin models** across 20+ model families (Claude, GPT, Gemini, DeepSeek, Llama, Mixtral, Command, Jamba, Grok, etc.)
-- **20+ aliases** for convenience (e.g., `claude` -> `claude-sonnet-4-20250514`, `grok` -> `grok-2`)
-- **20 providers** with authentication status detection
+- **200 builtin models** across 30+ model families (Claude, GPT, Gemini, DeepSeek, Llama, Mixtral, Command, Jamba, Grok, Qwen, MiniMax, Zhipu, Moonshot, etc.)
+- **23 aliases** for convenience (e.g., `claude` -> `claude-sonnet-4-20250514`, `grok` -> `grok-2`)
+- **42 providers** with authentication status detection
 
 ### Types
 
@@ -827,7 +827,7 @@ The desktop app (`openfang-desktop`) wraps the full OpenFang stack in a native T
 |  +----------------+  +------------------+  +-------------------+   |
 |  +----------------+  +------------------+  +-------------------+   |
 |  | ModelCatalog   |  | MeteringEngine   |  | ModelRouter       |   |
-|  | (51 models)    |  | (cost tracking)  |  | (auto-select)     |   |
+|  | (200 models)    |  | (cost tracking)  |  | (auto-select)     |   |
 |  +----------------+  +------------------+  +-------------------+   |
 |  +----------------+  +------------------+  +-------------------+   |
 |  | HeartbeatMon   |  | SetupWizard      |  | SkillRegistry     |   |

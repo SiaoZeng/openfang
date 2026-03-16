@@ -6,7 +6,7 @@
 <h3 align="center">The Agent Operating System</h3>
 
 <p align="center">
-  Open-source Agent OS built in Rust. 137K LOC. 14 crates. 2,252+ tests. Zero clippy warnings.<br/>
+  Open-source Agent OS built in Rust. 137K LOC. 14 crates. 1,848+ tests. Zero clippy warnings.<br/>
   <strong>One binary. Battle-tested. Agents that actually work for you.</strong>
 </p>
 
@@ -19,15 +19,15 @@
 <p align="center">
   <img src="https://img.shields.io/badge/language-Rust-orange?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT" />
-  <img src="https://img.shields.io/badge/version-0.3.30-green?style=flat-square" alt="v0.3.30" />
-  <img src="https://img.shields.io/badge/tests-2%2C252%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/version-0.4.4-green?style=flat-square" alt="v0.4.4" />
+  <img src="https://img.shields.io/badge/tests-1%2C848%2B%20passing-brightgreen?style=flat-square" alt="Tests" />
   <img src="https://img.shields.io/badge/clippy-0%20warnings-brightgreen?style=flat-square" alt="Clippy" />
   <a href="https://www.buymeacoffee.com/openfang" target="_blank"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat-square&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me A Coffee" /></a>
 </p>
 
 ---
 
-> **v0.3.30 — Security Hardening Release (March 2026)**
+> **v0.4.4 — Agent OS Phases 1-10 (March 2026)**
 >
 > OpenFang is feature-complete but still pre-1.0. You may encounter rough edges or breaking changes between minor versions. We ship fast and fix fast. Pin to a specific commit for production use until v1.0. [Report issues here.](https://github.com/RightNow-AI/openfang/issues)
 
@@ -393,11 +393,11 @@ For production workloads, use the [WhatsApp Cloud API](https://developers.facebo
 
 ---
 
-## 27 LLM Providers — 123+ Models
+## 42 LLM Providers — 190+ Models
 
-3 native drivers (Anthropic, Gemini, OpenAI-compatible) route to 27 providers:
+3 native drivers (Anthropic, Gemini, OpenAI-compatible) route to 42 providers:
 
-Anthropic, Gemini, OpenAI, Groq, DeepSeek, OpenRouter, Together, Mistral, Fireworks, Cohere, Perplexity, xAI, AI21, Cerebras, SambaNova, HuggingFace, Replicate, Ollama, vLLM, LM Studio, Qwen, MiniMax, Zhipu, Moonshot, Qianfan, Bedrock, and more.
+Anthropic, Gemini, OpenAI, Groq, DeepSeek, OpenRouter, Together, Mistral, Fireworks, Cohere, Perplexity, xAI, AI21, Cerebras, SambaNova, HuggingFace, Replicate, Ollama, vLLM, LM Studio, Qwen, MiniMax, Zhipu, Moonshot, Qianfan, Bedrock, Azure, Nvidia, Venice, Chutes, GitHub Copilot, Claude Code, Qwen Code, Codex, Lemonade, and more.
 
 Intelligent routing with task complexity scoring, automatic fallback, cost tracking, and per-model pricing.
 
@@ -484,7 +484,7 @@ openfang start
 # Build the workspace
 cargo build --workspace --lib
 
-# Run all tests (2,252+)
+# Run all tests (1,848+)
 cargo test --workspace
 
 # Lint (must be 0 warnings)
@@ -498,7 +498,7 @@ cargo fmt --all -- --check
 
 ## Stability Notice
 
-OpenFang v0.3.30 is pre-1.0. The architecture is solid, the test suite is comprehensive, and the security model is comprehensive. That said:
+OpenFang v0.4.4 is pre-1.0. The architecture is solid, the test suite is comprehensive, and the security model is comprehensive. That said:
 
 - **Breaking changes** may occur between minor versions until v1.0
 - **Some Hands** are more mature than others (Browser and Researcher are the most battle-tested)
